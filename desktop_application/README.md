@@ -43,10 +43,11 @@ Electron apps split into two isolated processes that only talk through a control
 ```
 src/
 ├── main/            Node.js backend — the only part allowed to touch the
-│                    filesystem or network. Owns:
-│                      - WebSocket client to the Master Node
-│                      - SQLite database (better-sqlite3)
-│                      - IPC channels to the renderer
+│   │                filesystem or network.
+│   ├── masterNodeClient.ts      WebSocket client to the Master Node,
+│   │                              writes readings to SQLite
+│   └── decisionEngineClient.ts   Spawns and talks to the Python decision
+│                                   engine (see Phase 6)
 │
 ├── preload/         Security bridge — exposes only specific, safe
 │                    functions from main to renderer (never the raw
@@ -55,6 +56,11 @@ src/
 └── renderer/         React + TypeScript UI — gauges, graphs, alerts.
                        Never touches the network or filesystem directly;
                        only receives data pushed from main.
+
+decision-engine/
+└── decision_engine.py   Fish Health Index scoring — persistent process,
+                           reads readings from stdin, writes scores to
+                           stdout (see Phase 6 for the pending formula note)
 ```
 
 **Why this separation matters:** the renderer is effectively a sandboxed browser page. If it could reach the filesystem or network directly, a compromised UI dependency could read/write anything on the machine. Routing everything through `main` and a narrow `preload` bridge is standard Electron security practice, not extra caution.
@@ -130,8 +136,39 @@ Add a query for date-ranged historical readings, and a Recharts line graph per p
 
 ### Phase 6 — Alerts & Decision Engine Integration
 
-Stand up the Python decision engine as a separate process. On each new reading, `main` sends it to the engine (via child process stdin/stdout or a local socket) and receives back a Fish Health Index score + status. If status is Warning/Critical, write a row to `alerts` and surface it in the UI.
-**Done when:** artificially sending a bad reading through the mock server triggers a visible alert in the UI.
+**Status: scaffolding done and tested; one formula pending team confirmation (see callout below).**
+
+The decision engine runs as a **persistent Python child process**, spawned once when the app starts and kept alive for its whole lifetime — not relaunched per reading, which would add Python's startup cost to every single sensor update. Communication happens over stdin/stdout as line-delimited JSON: `main` writes one reading per line to the process's stdin, the process writes one result per line back to stdout.
+
+**Files:**
+
+- `decision-engine/decision_engine.py` — the scoring logic itself
+- `src/main/decisionEngineClient.ts` — spawns the process, matches each request to its response, exposes `scoreReading()` to the rest of `main`
+
+**Wire it in** alongside your existing reading-received handler:
+
+```typescript
+// on app startup, alongside connectToMasterNode()
+startDecisionEngine();
+
+// in your reading-received handler, after insertReading.run(reading)
+const { score, status, recommendation } = await scoreReading(reading);
+if (status !== "Normal") {
+  insertAlert.run({
+    node_id: reading.node_id,
+    timestamp: reading.timestamp,
+    severity: status,
+    message: recommendation,
+  });
+  mainWindow.webContents.send("new-alert", { score, status, recommendation });
+}
+```
+
+> **⚠️ Pending confirmation — `to_subscore()` in `decision_engine.py`:** the ideal ranges and the 0.5/0.3/0.2 weights are settled, but the exact curve used to convert an out-of-range reading into a 0–100 sub-score (currently a simple linear falloff) has not been confirmed against Pratheesa's intended design. **Do not treat the current numbers as final** — this is the one function in this phase that's still open, everything else (the process lifecycle, the stdin/stdout framing, the Node-side integration) is stable and tested.
+
+**Before shipping — packaging note:** this assumes Python is installed on whoever runs the app. Before final distribution, bundle `decision_engine.py` with **PyInstaller** (`pyinstaller --onefile decision_engine.py`) into a standalone executable and spawn that instead of calling `python3` on a script — otherwise the app breaks on any machine without Python installed.
+
+**Done when:** artificially sending a bad reading through the mock server triggers a visible alert in the UI, end to end.
 
 ### Phase 7 — Remote Configuration (downlink)
 
