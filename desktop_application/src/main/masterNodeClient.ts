@@ -7,16 +7,20 @@ import type { Reading, SetIntervalCommand } from '../shared/types'
 const MASTER_NODE_URL = 'ws://localhost:8081'
 const RECONNECT_DELAY_MS = 3000
 
+export type ConnectionStatus = 'connected' | 'reconnecting'
+
 export class MasterNodeClient {
   private socket: WebSocket | null = null
   private reconnectTimer: NodeJS.Timeout | null = null
   private onReadingCallback: ((reading: Reading) => void) | null = null
+  private onStatusChangeCallback: ((status: ConnectionStatus) => void) | null = null
 
   connect(): void {
     this.socket = new WebSocket(MASTER_NODE_URL)
 
     this.socket.on('open', () => {
       console.log(`[masterNodeClient] connected to ${MASTER_NODE_URL}`)
+      this.onStatusChangeCallback?.('connected')
     })
 
     this.socket.on('message', (data) => {
@@ -30,6 +34,7 @@ export class MasterNodeClient {
 
     this.socket.on('close', () => {
       console.log('[masterNodeClient] disconnected, retrying in 3s')
+      this.onStatusChangeCallback?.('reconnecting')
       this.scheduleReconnect()
     })
 
@@ -40,6 +45,10 @@ export class MasterNodeClient {
 
   onReading(callback: (reading: Reading) => void): void {
     this.onReadingCallback = callback
+  }
+
+  onStatusChange(callback: (status: ConnectionStatus) => void): void {
+    this.onStatusChangeCallback = callback
   }
 
   sendCommand(command: SetIntervalCommand): void {
