@@ -27,6 +27,7 @@ function ConnectDevicePage(): React.JSX.Element {
   const [joinError, setJoinError] = useState<string | null>(null)
   const [joining, setJoining] = useState(false)
   const [discoveredNodes, setDiscoveredNodes] = useState<NodeListMessage['nodes']>([])
+  const [encrypted, setEncrypted] = useState(false)
 
   useEffect(() => {
     if (step !== 'linking') return
@@ -65,7 +66,7 @@ function ConnectDevicePage(): React.JSX.Element {
     setJoinError(null)
     try {
       await window.api.connectWifi(selectedSsid, password)
-      startLinking()
+      startLinking(MCU_MASTER_NODE_URL, password)
     } catch (err) {
       setJoinError(
         `Couldn't join "${selectedSsid}" automatically — this can happen if Windows requires elevated permissions to add a network profile.`
@@ -76,10 +77,14 @@ function ConnectDevicePage(): React.JSX.Element {
     }
   }
 
-  function startLinking(url: string = MCU_MASTER_NODE_URL): void {
+  // pw drives end-to-end encryption (AES-256-GCM, derived from this same
+  // WiFi password — see secureChannel.ts): omit it only for the dev mock,
+  // which speaks plain JSON and wouldn't understand an encrypted envelope.
+  function startLinking(url: string = MCU_MASTER_NODE_URL, pw?: string): void {
     setDiscoveredNodes([])
+    setEncrypted(!!pw)
     setStep('linking')
-    window.api.connectMasterNode(url)
+    window.api.connectMasterNode(url, pw)
   }
 
   async function handleOpenWifiSettings(): Promise<void> {
@@ -149,6 +154,11 @@ function ConnectDevicePage(): React.JSX.Element {
             onChange={(e) => setPassword(e.target.value)}
             autoFocus
           />
+          <p className="modal-hint">
+            {password
+              ? 'Sensor data will be end-to-end encrypted using this password.'
+              : 'No password — data will be sent unencrypted. Only do this on a network you trust.'}
+          </p>
           {joinError && (
             <>
               <p className="login-error">{joinError}</p>
@@ -159,7 +169,10 @@ function ConnectDevicePage(): React.JSX.Element {
                 <button className="apply-btn" onClick={handleOpenWifiSettings}>
                   Open Windows WiFi Settings
                 </button>
-                <button className="apply-btn" onClick={() => startLinking()}>
+                <button
+                  className="apply-btn"
+                  onClick={() => startLinking(MCU_MASTER_NODE_URL, password)}
+                >
                   I&apos;ve connected manually — Continue
                 </button>
               </div>
@@ -179,7 +192,10 @@ function ConnectDevicePage(): React.JSX.Element {
       {step === 'linking' && (
         <section className="settings-section">
           <h2>3. Linking to Master Node…</h2>
-          <p className="status">Connecting and waiting for it to report its sensor nodes.</p>
+          <p className="status">
+            Connecting {encrypted ? '(encrypted)' : '(plain — dev mock)'} and waiting for it to
+            report its sensor nodes.
+          </p>
           <button className="apply-btn" onClick={() => setStep('scan')}>
             Cancel
           </button>
@@ -188,7 +204,9 @@ function ConnectDevicePage(): React.JSX.Element {
 
       {step === 'discovered' && (
         <section className="settings-section">
-          <h2>Connected — {discoveredNodes.length} node(s) detected</h2>
+          <h2>
+            Connected{encrypted ? ' (encrypted)' : ''} — {discoveredNodes.length} node(s) detected
+          </h2>
           <ul className="wifi-list">
             {discoveredNodes.map((n) => (
               <li key={n.node_id} className="wifi-item">

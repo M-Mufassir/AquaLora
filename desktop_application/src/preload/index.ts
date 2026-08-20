@@ -86,7 +86,8 @@ const api = {
     ipcRenderer.invoke('wifi:connect', ssid, password),
   getWifiStatus: (): Promise<WifiConnectionState> => ipcRenderer.invoke('wifi:status'),
   openWifiSettings: (): Promise<void> => ipcRenderer.invoke('wifi:openSettings'),
-  connectMasterNode: (url: string): Promise<void> => ipcRenderer.invoke('master:connect', url),
+  connectMasterNode: (url: string, password?: string): Promise<void> =>
+    ipcRenderer.invoke('master:connect', url, password),
   onNodesDiscovered: (callback: (nodes: NodeListMessage['nodes']) => void): (() => void) => {
     const listener = (_event: Electron.IpcRendererEvent, nodes: NodeListMessage['nodes']): void =>
       callback(nodes)

@@ -39,7 +39,7 @@ interface AquaLoraApi {
   connectWifi: (ssid: string, password: string) => Promise<void>
   getWifiStatus: () => Promise<WifiConnectionState>
   openWifiSettings: () => Promise<void>
-  connectMasterNode: (url: string) => Promise<void>
+  connectMasterNode: (url: string, password?: string) => Promise<void>
   onNodesDiscovered: (callback: (nodes: NodeListMessage['nodes']) => void) => () => void
   listUsers: () => Promise<UserRow[]>
   createUserAccount: (username: string, password: string, role: string) => Promise<void>

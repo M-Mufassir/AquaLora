@@ -1,5 +1,6 @@
 import WebSocket from 'ws'
 import type { Reading, SetIntervalCommand, NodeListMessage } from '../shared/types'
+import { encryptMessage, decryptMessage } from './secureChannel'
 
 // Default target in development, before a device has been paired via the
 // Connect Device wizard (see README "Real MCU pairing"). Once paired, main
@@ -14,11 +15,16 @@ export type ConnectionStatus = 'connected' | 'reconnecting'
 export class MasterNodeClient {
   private socket: WebSocket | null = null
   private reconnectTimer: NodeJS.Timeout | null = null
+  private encryptionKey: Buffer | null = null
   private onReadingCallback: ((reading: Reading) => void) | null = null
   private onNodeListCallback: ((nodes: NodeListMessage['nodes']) => void) | null = null
   private onStatusChangeCallback: ((status: ConnectionStatus) => void) | null = null
 
-  connect(url: string = DEFAULT_MOCK_URL): void {
+  // encryptionKey is present for a real MCU paired with a WiFi password
+  // (AES-256-GCM, see secureChannel.ts) and absent for the dev mock, which
+  // speaks plain JSON — mirroring the two states the wizard can leave a
+  // pairing in.
+  connect(url: string = DEFAULT_MOCK_URL, encryptionKey?: Buffer): void {
     // Tear down any existing connection first — connect() can now be called
     // again mid-session when the user re-pairs to a different Master Node
     // from the Connect Device wizard, which never happened before.
@@ -31,16 +37,24 @@ export class MasterNodeClient {
       this.socket.close()
     }
 
+    this.encryptionKey = encryptionKey ?? null
+
     this.socket = new WebSocket(url)
 
     this.socket.on('open', () => {
-      console.log(`[masterNodeClient] connected to ${url}`)
+      console.log(
+        `[masterNodeClient] connected to ${url}${this.encryptionKey ? ' (encrypted)' : ' (plain — dev/mock)'}`
+      )
       this.onStatusChangeCallback?.('connected')
     })
 
     this.socket.on('message', (data) => {
+      const raw = data.toString()
+      const plaintext = this.encryptionKey ? decryptMessage(this.encryptionKey, raw) : raw
+      if (plaintext === null) return // decryptMessage already logged why
+
       try {
-        const parsed = JSON.parse(data.toString())
+        const parsed = JSON.parse(plaintext)
         if (parsed.type === 'node_list') {
           this.onNodeListCallback?.((parsed as NodeListMessage).nodes)
         } else {
@@ -54,7 +68,7 @@ export class MasterNodeClient {
     this.socket.on('close', () => {
       console.log(`[masterNodeClient] disconnected from ${url}, retrying in 3s`)
       this.onStatusChangeCallback?.('reconnecting')
-      this.scheduleReconnect(url)
+      this.scheduleReconnect(url, this.encryptionKey)
     })
 
     this.socket.on('error', (err) => {
@@ -75,18 +89,19 @@ export class MasterNodeClient {
   }
 
   sendCommand(command: SetIntervalCommand): void {
-    if (this.socket?.readyState === WebSocket.OPEN) {
-      this.socket.send(JSON.stringify(command))
-    } else {
+    if (this.socket?.readyState !== WebSocket.OPEN) {
       console.warn('[masterNodeClient] cannot send command, socket not open')
+      return
     }
+    const payload = JSON.stringify(command)
+    this.socket.send(this.encryptionKey ? encryptMessage(this.encryptionKey, payload) : payload)
   }
 
-  private scheduleReconnect(url: string): void {
+  private scheduleReconnect(url: string, encryptionKey: Buffer | null): void {
     if (this.reconnectTimer) return
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null
-      this.connect(url)
+      this.connect(url, encryptionKey ?? undefined)
     }, RECONNECT_DELAY_MS)
   }
 }

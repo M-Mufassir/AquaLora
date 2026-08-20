@@ -66,6 +66,11 @@ AquaLoRa/
 ├── firmware_design/
 │   ├── master_node/               Office gateway firmware (Member 2)
 │   │                                ESP32 + LoRa RX/TX + OLED + WiFi + LittleFS
+│   │   └── AquaLoRa_MasterNode_Dummy/   Placeholder until Member 2's real
+│   │                                     firmware lands: own WiFi AP + WebSocket
+│   │                                     server + dummy sensor data, so Member 3
+│   │                                     could build/validate the dashboard's WiFi
+│   │                                     pairing flow against real hardware early
 │   └── slave_node/                 Pond-side firmware (Members 1 & 2)
 │                                     ESP32 + sensors + LoRa TX/RX + deep sleep
 │

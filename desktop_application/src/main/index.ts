@@ -32,6 +32,7 @@ import {
 import { MasterNodeClient } from './masterNodeClient'
 import { DecisionEngine } from './decisionEngine'
 import { scanNetworks, connectToNetwork, getCurrentConnection } from './wifiManager'
+import { deriveKeyFromPassword } from './secureChannel'
 import type { Score } from '../shared/types'
 
 const OFFLINE_CHECK_INTERVAL_MS = 30_000
@@ -160,9 +161,20 @@ app.whenReady().then(() => {
     // lets the wizard fall back to "join it yourself, then continue".
     shell.openExternal('ms-settings:network-wifi')
   })
-  ipcMain.handle('master:connect', (_event, url: string) => {
+  ipcMain.handle('master:connect', (_event, url: string, password?: string) => {
     setSetting('master_node_url', url)
-    masterNodeClient.connect(url)
+    // No password means the dev-only "use local mock" path, or an
+    // intentionally open MCU AP — both stay plain. A real password derives
+    // an AES-256-GCM key (see secureChannel.ts) that's persisted so a
+    // restart can reconnect encrypted without repeating the wizard.
+    if (password) {
+      const key = deriveKeyFromPassword(password)
+      setSetting('master_node_key_hex', key.toString('hex'))
+      masterNodeClient.connect(url, key)
+    } else {
+      setSetting('master_node_key_hex', '')
+      masterNodeClient.connect(url)
+    }
   })
 
   ipcMain.handle('users:list', () => listUsers())
@@ -251,7 +263,11 @@ app.whenReady().then(() => {
   // happens to be running) and populate nodes the user never asked to see.
   const pairedMasterNodeUrl = getSettingOptional('master_node_url')
   if (pairedMasterNodeUrl) {
-    masterNodeClient.connect(pairedMasterNodeUrl)
+    const pairedKeyHex = getSettingOptional('master_node_key_hex')
+    masterNodeClient.connect(
+      pairedMasterNodeUrl,
+      pairedKeyHex ? Buffer.from(pairedKeyHex, 'hex') : undefined
+    )
   } else {
     console.log('[main] no paired Master Node yet — waiting for the Connect Device wizard')
   }

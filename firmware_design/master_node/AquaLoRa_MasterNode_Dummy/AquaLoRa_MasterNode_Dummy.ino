@@ -8,24 +8,36 @@
 // Connect Device wizard and live-data pipeline can be tested end-to-end
 // against real hardware before real sensors exist.
 //
-// Plain WebSocket, no TLS/auth — matches the dashboard's current state
-// (direct transfer for now, a security pass is explicitly future work).
+// Every message is AES-256-GCM encrypted (confidentiality + tamper
+// detection) using a key derived from AP_PASSWORD below — the same
+// password the user types into the dashboard's wizard to join this AP, so
+// there's nothing extra to provision. See secureChannel.ts on the dashboard
+// side for the matching implementation; the envelope format
+// ({"iv","tag","data"}, all base64) must stay identical on both ends.
 //
 // Board: any ESP32 Dev Module (Arduino IDE, esp32 board package).
 // Libraries (Library Manager):
 //   - "WebSockets" by Markus Sattler (Links2004/arduinoWebSockets)
 //   - "ArduinoJson" by Benoit Blanchon
+// mbedtls (AES-GCM, SHA-256, base64) ships with the esp32 board package —
+// no extra library needed for the crypto itself.
 //
-// See firmware/README.md for setup steps.
+// See README.md (this folder) for setup steps.
 
 #include <WiFi.h>
 #include <WebSocketsServer.h>
 #include <ArduinoJson.h>
 #include <time.h>
 #include <sys/time.h>
+#include <mbedtls/gcm.h>
+#include <mbedtls/base64.h>
+#include <mbedtls/md.h>
 
 // ---- WiFi AP config — must match what the dashboard's Connect Device
-// wizard expects the user to pick from the network list. -------------------
+// wizard expects the user to pick from the network list. This password is
+// also the encryption pairing secret (see the AES key derivation below), so
+// changing it changes the encryption key too — nothing else to keep in
+// sync. -----------------------------------------------------------------
 static const char* AP_SSID = "AquaLoRa-MasterNode";
 static const char* AP_PASSWORD = "aqualora123";  // WPA2 min length is 8 chars
 static const uint16_t WS_PORT = 8081;            // matches mock_master_node.js
@@ -52,6 +64,118 @@ static unsigned long lastSendMs[NODE_COUNT] = { 0 };
 
 WebSocketsServer webSocket(WS_PORT);
 
+// ---------------------------------------------------------------------
+// Encryption — AES-256-GCM, key = SHA-256(AP_PASSWORD). Must exactly match
+// desktop_application/src/main/secureChannel.ts: same KDF, 12-byte random
+// IV per message, 16-byte auth tag, no additional authenticated data, and
+// the same {"iv","tag","data"} JSON envelope shape (all three fields
+// base64). ---------------------------------------------------------------
+static mbedtls_gcm_context gcmCtx;
+static const size_t GCM_IV_LEN = 12;
+static const size_t GCM_TAG_LEN = 16;
+static const size_t MAX_PLAINTEXT_LEN = 256;  // generous for our small JSON messages
+
+static void initCipher() {
+  uint8_t key[32];
+  const mbedtls_md_info_t* mdInfo = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+  mbedtls_md(mdInfo, (const unsigned char*)AP_PASSWORD, strlen(AP_PASSWORD), key);
+  mbedtls_gcm_init(&gcmCtx);
+  mbedtls_gcm_setkey(&gcmCtx, MBEDTLS_CIPHER_ID_AES, key, 256);
+}
+
+static void fillRandom(uint8_t* buf, size_t len) {
+  size_t i = 0;
+  while (i < len) {
+    uint32_t r = esp_random();
+    size_t n = min((size_t)4, len - i);
+    memcpy(buf + i, &r, n);
+    i += n;
+  }
+}
+
+// Returns an empty String on failure (caller should skip sending rather
+// than transmit something unencrypted).
+static String encryptEnvelope(const String& plaintext) {
+  size_t len = plaintext.length();
+  if (len == 0 || len > MAX_PLAINTEXT_LEN) return String();
+
+  uint8_t iv[GCM_IV_LEN];
+  fillRandom(iv, GCM_IV_LEN);
+
+  uint8_t cipherBuf[MAX_PLAINTEXT_LEN];
+  uint8_t tag[GCM_TAG_LEN];
+  int ret = mbedtls_gcm_crypt_and_tag(
+    &gcmCtx, MBEDTLS_GCM_ENCRYPT, len,
+    iv, GCM_IV_LEN,
+    nullptr, 0,
+    (const uint8_t*)plaintext.c_str(), cipherBuf,
+    GCM_TAG_LEN, tag);
+  if (ret != 0) return String();
+
+  char ivB64[32];
+  char tagB64[32];
+  char dataB64[360];
+  size_t olen;
+  mbedtls_base64_encode((uint8_t*)ivB64, sizeof(ivB64), &olen, iv, GCM_IV_LEN);
+  mbedtls_base64_encode((uint8_t*)tagB64, sizeof(tagB64), &olen, tag, GCM_TAG_LEN);
+  mbedtls_base64_encode((uint8_t*)dataB64, sizeof(dataB64), &olen, cipherBuf, len);
+  dataB64[olen] = '\0';
+
+  StaticJsonDocument<640> env;
+  env["iv"] = ivB64;
+  env["tag"] = tagB64;
+  env["data"] = dataB64;
+  String out;
+  serializeJson(env, out);
+  return out;
+}
+
+// Returns false (and leaves outPlain untouched) on any failure — bad JSON,
+// undersized/oversized fields, or a failed auth tag all mean "don't trust
+// this message, drop it" rather than something to recover from.
+static bool decryptEnvelope(const String& envelopeJson, String& outPlain) {
+  StaticJsonDocument<640> env;
+  if (deserializeJson(env, envelopeJson) != DeserializationError::Ok) return false;
+
+  const char* ivB64 = env["iv"] | "";
+  const char* tagB64 = env["tag"] | "";
+  const char* dataB64 = env["data"] | "";
+  if (!*ivB64 || !*tagB64 || !*dataB64) return false;
+
+  uint8_t iv[GCM_IV_LEN];
+  uint8_t tag[GCM_TAG_LEN];
+  uint8_t cipherBuf[MAX_PLAINTEXT_LEN];
+  size_t olen;
+
+  if (mbedtls_base64_decode(iv, sizeof(iv), &olen, (const uint8_t*)ivB64, strlen(ivB64)) != 0
+      || olen != GCM_IV_LEN) {
+    return false;
+  }
+  if (mbedtls_base64_decode(tag, sizeof(tag), &olen, (const uint8_t*)tagB64, strlen(tagB64)) != 0
+      || olen != GCM_TAG_LEN) {
+    return false;
+  }
+  if (mbedtls_base64_decode(cipherBuf, sizeof(cipherBuf), &olen, (const uint8_t*)dataB64,
+                             strlen(dataB64))
+      != 0) {
+    return false;
+  }
+  size_t cipherLen = olen;
+
+  uint8_t plainBuf[MAX_PLAINTEXT_LEN + 1];
+  int ret = mbedtls_gcm_auth_decrypt(
+    &gcmCtx, cipherLen,
+    iv, GCM_IV_LEN,
+    nullptr, 0,
+    tag, GCM_TAG_LEN,
+    cipherBuf, plainBuf);
+  if (ret != 0) return false;  // MBEDTLS_ERR_GCM_AUTH_FAILED: wrong key or tampered message
+
+  plainBuf[cipherLen] = '\0';
+  outPlain = String((char*)plainBuf);
+  return true;
+}
+
 // Timestamp is a placeholder: the AP-only ESP32 has no internet access for
 // NTP, so there's no way to get real wall-clock time. We seed the system
 // clock once at boot with a fixed date and let it free-run from there —
@@ -76,6 +200,26 @@ static float randomFloat(float lo, float hi) {
   return lo + (hi - lo) * (float)random(0, 10001) / 10000.0f;
 }
 
+static void sendEncrypted(uint8_t clientId, const String& plain, const char* label) {
+  String envelope = encryptEnvelope(plain);
+  if (envelope.length() == 0) {
+    Serial.printf("[master] encrypt failed, dropping %s\n", label);
+    return;
+  }
+  webSocket.sendTXT(clientId, envelope);
+  Serial.printf("[master] sent %s (encrypted, %u bytes plaintext)\n", label, plain.length());
+}
+
+static void broadcastEncrypted(const String& plain, const char* label) {
+  String envelope = encryptEnvelope(plain);
+  if (envelope.length() == 0) {
+    Serial.printf("[master] encrypt failed, dropping %s\n", label);
+    return;
+  }
+  webSocket.broadcastTXT(envelope);
+  Serial.printf("[master] sent %s (encrypted, %u bytes plaintext)\n", label, plain.length());
+}
+
 static void sendNodeList(uint8_t clientId) {
   StaticJsonDocument<256> doc;
   doc["type"] = "node_list";
@@ -84,10 +228,9 @@ static void sendNodeList(uint8_t clientId) {
     JsonObject o = arr.createNestedObject();
     o["node_id"] = NODES[i].node_id;
   }
-  String out;
-  serializeJson(doc, out);
-  webSocket.sendTXT(clientId, out);
-  Serial.println("[master] sent node_list: " + out);
+  String plain;
+  serializeJson(doc, plain);
+  sendEncrypted(clientId, plain, "node_list");
 }
 
 static void broadcastReading(const DummyNode& node) {
@@ -99,15 +242,14 @@ static void broadcastReading(const DummyNode& node) {
   doc["tds"] = random(node.tdsMin, node.tdsMax);
   doc["battery_pct"] = random(60, 100);
   doc["rssi"] = -random(50, 90);
-  String out;
-  serializeJson(doc, out);
-  webSocket.broadcastTXT(out);
-  Serial.println("[master] sent reading: " + out);
+  String plain;
+  serializeJson(doc, plain);
+  broadcastEncrypted(plain, "reading");
 }
 
-static void handleDownlinkCommand(uint8_t* payload, size_t length) {
+static void handleDownlinkCommand(const String& plain) {
   StaticJsonDocument<256> cmd;
-  DeserializationError err = deserializeJson(cmd, payload, length);
+  DeserializationError err = deserializeJson(cmd, plain);
   if (err) {
     Serial.println("[master] received non-JSON downlink message");
     return;
@@ -132,9 +274,16 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length)
     case WStype_DISCONNECTED:
       Serial.printf("[master] dashboard disconnected (client #%u)\n", num);
       break;
-    case WStype_TEXT:
-      handleDownlinkCommand(payload, length);
+    case WStype_TEXT: {
+      String envelope((char*)payload, length);
+      String plain;
+      if (!decryptEnvelope(envelope, plain)) {
+        Serial.println("[master] dropped downlink message: decrypt/auth failed (wrong password or tampered)");
+        break;
+      }
+      handleDownlinkCommand(plain);
       break;
+    }
     default:
       break;
   }
@@ -144,6 +293,7 @@ void setup() {
   Serial.begin(115200);
   seedFakeClock();
   randomSeed(esp_random());
+  initCipher();
 
   WiFi.mode(WIFI_AP);
   WiFi.softAP(AP_SSID, AP_PASSWORD);
@@ -154,7 +304,7 @@ void setup() {
 
   webSocket.begin();
   webSocket.onEvent(webSocketEvent);
-  Serial.printf("[master] WebSocket server listening on port %u\n", WS_PORT);
+  Serial.printf("[master] WebSocket server listening on port %u (AES-256-GCM encrypted)\n", WS_PORT);
 }
 
 void loop() {
