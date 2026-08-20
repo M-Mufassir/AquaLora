@@ -1,6 +1,17 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
-import type { Reading, StoredReading, Score, Alert, NodeRow, UserRow, Settings } from '../shared/types'
+import type {
+  Reading,
+  StoredReading,
+  Score,
+  Alert,
+  NodeRow,
+  UserRow,
+  Settings,
+  WifiNetwork,
+  WifiConnectionState,
+  NodeListMessage
+} from '../shared/types'
 
 interface CsvExportResult {
   canceled: boolean
@@ -18,13 +29,13 @@ const api = {
   },
   getRecentReadings: (nodeId: string, limit?: number): Promise<StoredReading[]> =>
     ipcRenderer.invoke('readings:getRecent', nodeId, limit),
-  getReadingsInRange: (nodeId: string, startIso: string, endIso: string): Promise<StoredReading[]> =>
-    ipcRenderer.invoke('readings:getRange', nodeId, startIso, endIso),
-  exportReadingsCsv: (
+  getReadingsInRange: (
     nodeId: string,
     startIso: string,
     endIso: string
-  ): Promise<CsvExportResult> => ipcRenderer.invoke('readings:exportCsv', nodeId, startIso, endIso),
+  ): Promise<StoredReading[]> => ipcRenderer.invoke('readings:getRange', nodeId, startIso, endIso),
+  exportReadingsCsv: (nodeId: string, startIso: string, endIso: string): Promise<CsvExportResult> =>
+    ipcRenderer.invoke('readings:exportCsv', nodeId, startIso, endIso),
   onScore: (callback: (score: Score) => void): (() => void) => {
     const listener = (_event: Electron.IpcRendererEvent, score: Score): void => callback(score)
     ipcRenderer.on('score:new', listener)
@@ -42,10 +53,7 @@ const api = {
   acknowledgeAlert: (id: number): Promise<void> => ipcRenderer.invoke('alerts:acknowledge', id),
   setSamplingInterval: (minutes: number): Promise<void> =>
     ipcRenderer.invoke('command:setInterval', minutes),
-  login: (
-    username: string,
-    password: string
-  ): Promise<{ username: string; role: string } | null> =>
+  login: (username: string, password: string): Promise<{ username: string; role: string } | null> =>
     ipcRenderer.invoke('auth:login', username, password),
   onConnectionStatus: (callback: (status: 'connected' | 'reconnecting') => void): (() => void) => {
     const listener = (
@@ -55,7 +63,9 @@ const api = {
     ipcRenderer.on('connection:status', listener)
     return () => ipcRenderer.removeListener('connection:status', listener)
   },
-  onNodeStatus: (callback: (update: { node_id: string; online: boolean }) => void): (() => void) => {
+  onNodeStatus: (
+    callback: (update: { node_id: string; online: boolean }) => void
+  ): (() => void) => {
     const listener = (
       _event: Electron.IpcRendererEvent,
       update: { node_id: string; online: boolean }
@@ -71,6 +81,18 @@ const api = {
   getAllNodes: (): Promise<NodeRow[]> => ipcRenderer.invoke('nodes:getAll'),
   upsertNode: (id: string, name: string, location: string): Promise<NodeRow> =>
     ipcRenderer.invoke('nodes:upsert', id, name, location),
+  scanWifi: (): Promise<WifiNetwork[]> => ipcRenderer.invoke('wifi:scan'),
+  connectWifi: (ssid: string, password: string): Promise<void> =>
+    ipcRenderer.invoke('wifi:connect', ssid, password),
+  getWifiStatus: (): Promise<WifiConnectionState> => ipcRenderer.invoke('wifi:status'),
+  openWifiSettings: (): Promise<void> => ipcRenderer.invoke('wifi:openSettings'),
+  connectMasterNode: (url: string): Promise<void> => ipcRenderer.invoke('master:connect', url),
+  onNodesDiscovered: (callback: (nodes: NodeListMessage['nodes']) => void): (() => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, nodes: NodeListMessage['nodes']): void =>
+      callback(nodes)
+    ipcRenderer.on('nodes:discovered', listener)
+    return () => ipcRenderer.removeListener('nodes:discovered', listener)
+  },
   listUsers: (): Promise<UserRow[]> => ipcRenderer.invoke('users:list'),
   createUserAccount: (username: string, password: string, role: string): Promise<void> =>
     ipcRenderer.invoke('users:create', username, password, role),

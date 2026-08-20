@@ -1,9 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useReadingsStore, EMPTY_NODE_STATE } from '../store/useReadingsStore'
 import { deriveStatusTier, deriveParamStatus } from '../../../shared/types'
 import NodeList from '../components/NodeList'
-import AddNodeModal from '../components/AddNodeModal'
 import Gauge from '../components/Gauge'
 import NodeStatusBar from '../components/NodeStatusBar'
 import AlertList from '../components/AlertList'
@@ -16,8 +15,6 @@ function LogsPage(): React.JSX.Element {
   const nodesById = useReadingsStore((s) => s.nodesById)
   const alerts = useReadingsStore((s) => s.alerts)
   const acknowledge = useReadingsStore((s) => s.acknowledge)
-  const upsertKnownNode = useReadingsStore((s) => s.upsertKnownNode)
-  const [showAddModal, setShowAddModal] = useState(false)
 
   useEffect(() => {
     if (!nodeId && knownNodes.length > 0) {
@@ -38,22 +35,23 @@ function LogsPage(): React.JSX.Element {
   return (
     <div className="page logs-page">
       <aside className="logs-sidebar">
-        <button className="add-node-btn" onClick={() => setShowAddModal(true)}>
-          + Add Node
-        </button>
         <NodeList nodes={knownNodes} nodesById={nodesById} selectedNodeId={nodeId ?? null} />
       </aside>
 
       <section className="logs-detail">
         {!selectedNode ? (
-          <p className="status">Select a node, or add one to get started.</p>
+          <p className="status">
+            Select a node, or pair a Master Node from Settings to get started.
+          </p>
         ) : (
           <>
             <div className="logs-detail-header">
               <h1>{selectedNode.name || selectedNode.id}</h1>
               <span className={`tier-badge tier-${tier.toLowerCase()}`}>{tier}</span>
             </div>
-            {selectedNode.location && <p className="node-summary-location">{selectedNode.location}</p>}
+            {selectedNode.location && (
+              <p className="node-summary-location">{selectedNode.location}</p>
+            )}
 
             <NodeStatusBar nodeId={selectedNode.id} status={state.status} />
             <AlertList alerts={nodeAlerts} onAcknowledge={handleAcknowledge} />
@@ -99,16 +97,6 @@ function LogsPage(): React.JSX.Element {
           </>
         )}
       </section>
-
-      {showAddModal && (
-        <AddNodeModal
-          onClose={() => setShowAddModal(false)}
-          onCreated={(node) => {
-            upsertKnownNode(node)
-            navigate(`/logs/${node.id}`)
-          }}
-        />
-      )}
     </div>
   )
 }

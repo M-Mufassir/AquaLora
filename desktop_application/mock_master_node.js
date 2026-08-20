@@ -62,6 +62,13 @@ function buildReading(profile) {
 wss.on('connection', (socket) => {
   console.log('[mock-master-node] dashboard connected')
 
+  // Real Master Node firmware sends this the moment a client connects, so
+  // the dashboard's Connect Device wizard can show "N nodes detected"
+  // immediately instead of waiting for each node's first staggered Reading.
+  socket.send(
+    JSON.stringify({ type: 'node_list', nodes: NODES.map((n) => ({ node_id: n.node_id })) })
+  )
+
   // Stagger each node's first send so they don't all land in the same
   // tick — closer to how independent Slave Nodes would actually behave.
   const timers = []

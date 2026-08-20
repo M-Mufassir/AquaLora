@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useReadingsStore } from '../store/useReadingsStore'
 import ThemeToggle from '../components/ThemeToggle'
 import type { UserRow } from '../../../shared/types'
 
 function SettingsPage(): React.JSX.Element {
+  const navigate = useNavigate()
   const settings = useReadingsStore((s) => s.settings)
   const setSoundEnabled = useReadingsStore((s) => s.setSoundEnabled)
   const currentUser = useReadingsStore((s) => s.currentUser)
@@ -62,6 +64,16 @@ function SettingsPage(): React.JSX.Element {
       <h1>Settings</h1>
 
       <section className="settings-section">
+        <h2>Device Connection</h2>
+        <div className="settings-row">
+          <span>Pair with a different Master Node, or re-run the setup wizard</span>
+          <button className="apply-btn" onClick={() => navigate('/connect')}>
+            Connect Device
+          </button>
+        </div>
+      </section>
+
+      <section className="settings-section">
         <h2>Appearance</h2>
         <div className="settings-row">
           <span>Theme</span>
@@ -108,7 +120,10 @@ function SettingsPage(): React.JSX.Element {
                           onChange={(e) => setChangePasswordValue(e.target.value)}
                           placeholder="New password"
                         />
-                        <button className="apply-btn" onClick={() => handleChangePassword(u.username)}>
+                        <button
+                          className="apply-btn"
+                          onClick={() => handleChangePassword(u.username)}
+                        >
                           Save
                         </button>
                         <button className="apply-btn" onClick={() => setChangePasswordFor(null)}>
@@ -117,7 +132,10 @@ function SettingsPage(): React.JSX.Element {
                       </>
                     ) : (
                       <>
-                        <button className="apply-btn" onClick={() => setChangePasswordFor(u.username)}>
+                        <button
+                          className="apply-btn"
+                          onClick={() => setChangePasswordFor(u.username)}
+                        >
                           Change password
                         </button>
                         <button

@@ -24,11 +24,14 @@ import {
   changePassword,
   getAllNodes,
   upsertNode,
+  upsertNodeStub,
   getSetting,
+  getSettingOptional,
   setSetting
 } from './db'
 import { MasterNodeClient } from './masterNodeClient'
 import { DecisionEngine } from './decisionEngine'
+import { scanNetworks, connectToNetwork, getCurrentConnection } from './wifiManager'
 import type { Score } from '../shared/types'
 
 const OFFLINE_CHECK_INTERVAL_MS = 30_000
@@ -109,10 +112,8 @@ app.whenReady().then(() => {
     getRecentReadings(nodeId, limit)
   )
 
-  ipcMain.handle(
-    'readings:getRange',
-    (_event, nodeId: string, startIso: string, endIso: string) =>
-      getReadingsInRange(nodeId, startIso, endIso)
+  ipcMain.handle('readings:getRange', (_event, nodeId: string, startIso: string, endIso: string) =>
+    getReadingsInRange(nodeId, startIso, endIso)
   )
 
   ipcMain.handle(
@@ -149,6 +150,21 @@ app.whenReady().then(() => {
     upsertNode(id, name, location)
   )
 
+  ipcMain.handle('wifi:scan', () => scanNetworks())
+  ipcMain.handle('wifi:connect', (_event, ssid: string, password: string) =>
+    connectToNetwork(ssid, password)
+  )
+  ipcMain.handle('wifi:status', () => getCurrentConnection())
+  ipcMain.handle('wifi:openSettings', () => {
+    // netsh-based joins can fail under restrictive Windows policies — this
+    // lets the wizard fall back to "join it yourself, then continue".
+    shell.openExternal('ms-settings:network-wifi')
+  })
+  ipcMain.handle('master:connect', (_event, url: string) => {
+    setSetting('master_node_url', url)
+    masterNodeClient.connect(url)
+  })
+
   ipcMain.handle('users:list', () => listUsers())
   ipcMain.handle('users:create', (_event, username: string, password: string, role: string) =>
     createUser(username, password, role)
@@ -162,15 +178,31 @@ app.whenReady().then(() => {
     theme: getSetting('theme', 'dark'),
     soundEnabled: getSetting('sound_enabled', '1') === '1'
   }))
-  ipcMain.handle('settings:set', (_event, key: 'theme' | 'soundEnabled', value: string | boolean) => {
-    if (key === 'theme') setSetting('theme', String(value))
-    if (key === 'soundEnabled') setSetting('sound_enabled', value ? '1' : '0')
-  })
+  ipcMain.handle(
+    'settings:set',
+    (_event, key: 'theme' | 'soundEnabled', value: string | boolean) => {
+      if (key === 'theme') setSetting('theme', String(value))
+      if (key === 'soundEnabled') setSetting('sound_enabled', value ? '1' : '0')
+    }
+  )
 
   decisionEngine.start()
 
   masterNodeClient.onStatusChange((status) => {
     mainWindow?.webContents.send('connection:status', status)
+  })
+
+  masterNodeClient.onNodeList((nodes) => {
+    console.log('[main] node list received:', nodes)
+    for (const { node_id } of nodes) {
+      try {
+        const node = upsertNodeStub(node_id)
+        mainWindow?.webContents.send('node:updated', node)
+      } catch (err) {
+        console.error('[main] failed to persist discovered node:', err)
+      }
+    }
+    mainWindow?.webContents.send('nodes:discovered', nodes)
   })
 
   masterNodeClient.onReading((reading) => {
@@ -213,7 +245,16 @@ app.whenReady().then(() => {
       }
     })
   })
-  masterNodeClient.connect()
+  // Only auto-connect if the user has actually paired with a Master Node
+  // before (via the Connect Device wizard) — otherwise a fresh install, or
+  // one that's never been paired, would silently dial the dev mock (if one
+  // happens to be running) and populate nodes the user never asked to see.
+  const pairedMasterNodeUrl = getSettingOptional('master_node_url')
+  if (pairedMasterNodeUrl) {
+    masterNodeClient.connect(pairedMasterNodeUrl)
+  } else {
+    console.log('[main] no paired Master Node yet — waiting for the Connect Device wizard')
+  }
 
   setInterval(() => {
     try {

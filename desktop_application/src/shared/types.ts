@@ -16,6 +16,26 @@ export interface SetIntervalCommand {
   minutes: number
 }
 
+// Sent once by the Master Node right when the dashboard's WebSocket connects,
+// so the UI can show "N nodes detected" immediately instead of waiting for
+// each node's first staggered Reading to arrive. Distinguished from a
+// Reading by the `type` field — Reading messages never carry one, so this
+// doesn't touch the fixed data contract above.
+export interface NodeListMessage {
+  type: 'node_list'
+  nodes: { node_id: string }[]
+}
+
+export interface WifiNetwork {
+  ssid: string
+  signalLevel: number
+  security: string
+}
+
+export interface WifiConnectionState {
+  ssid: string | null
+}
+
 export interface StoredReading {
   id: number
   node_id: string

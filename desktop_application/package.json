@@ -25,6 +25,7 @@
     "@electron-toolkit/utils": "^4.0.0",
     "bcryptjs": "^3.0.3",
     "better-sqlite3": "^13.0.3",
+    "node-wifi": "^2.0.16",
     "react-router-dom": "^7.18.2",
     "recharts": "^3.10.1",
     "ws": "^8.21.3",

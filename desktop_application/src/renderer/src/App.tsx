@@ -1,5 +1,5 @@
-import { useEffect } from 'react'
-import { HashRouter, Routes, Route, NavLink } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
+import { HashRouter, Routes, Route, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useReadingsStore } from './store/useReadingsStore'
 import LoginScreen from './components/LoginScreen'
 import ThemeToggle from './components/ThemeToggle'
@@ -7,6 +7,28 @@ import CriticalAlertOverlay from './components/CriticalAlertOverlay'
 import HomePage from './pages/HomePage'
 import LogsPage from './pages/LogsPage'
 import SettingsPage from './pages/SettingsPage'
+import ConnectDevicePage from './pages/ConnectDevicePage'
+
+// Sends a freshly logged-in user with zero paired nodes straight to the
+// pairing wizard instead of an empty Home page — but only once per app
+// session, so deliberately navigating back to Home afterwards isn't fought.
+// Waits for nodesLoaded so it doesn't fire on the initial empty store state
+// before the getAllNodes() fetch resolves.
+function FirstRunRedirect({ nodesLoaded }: { nodesLoaded: boolean }): null {
+  const navigate = useNavigate()
+  const location = useLocation()
+  const knownNodes = useReadingsStore((s) => s.knownNodes)
+  const hasCheckedRef = useRef(false)
+
+  useEffect(() => {
+    if (hasCheckedRef.current || !nodesLoaded) return
+    if (location.pathname !== '/') return
+    hasCheckedRef.current = true
+    if (knownNodes.length === 0) navigate('/connect', { replace: true })
+  }, [knownNodes, nodesLoaded, location.pathname, navigate])
+
+  return null
+}
 
 function App(): React.JSX.Element {
   const currentUser = useReadingsStore((s) => s.currentUser)
@@ -21,6 +43,7 @@ function App(): React.JSX.Element {
   const setKnownNodes = useReadingsStore((s) => s.setKnownNodes)
   const upsertKnownNode = useReadingsStore((s) => s.upsertKnownNode)
   const setSettings = useReadingsStore((s) => s.setSettings)
+  const [nodesLoaded, setNodesLoaded] = useState(false)
 
   useEffect(() => {
     window.api.getSettings().then((settings) => {
@@ -41,7 +64,10 @@ function App(): React.JSX.Element {
     })
     const unsubNodeUpdated = window.api.onNodeUpdated((node) => upsertKnownNode(node))
 
-    window.api.getAllNodes().then(setKnownNodes)
+    window.api.getAllNodes().then((nodes) => {
+      setKnownNodes(nodes)
+      setNodesLoaded(true)
+    })
     window.api.getAllRecentAlerts().then(setAlerts)
 
     return () => {
@@ -71,6 +97,7 @@ function App(): React.JSX.Element {
   return (
     <HashRouter>
       <div className="app-shell">
+        <FirstRunRedirect nodesLoaded={nodesLoaded} />
         <nav className="top-nav">
           <span className="app-title">AquaLoRa</span>
           <NavLink to="/" end className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
@@ -79,7 +106,10 @@ function App(): React.JSX.Element {
           <NavLink to="/logs" className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
             Logs
           </NavLink>
-          <NavLink to="/settings" className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
+          <NavLink
+            to="/settings"
+            className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
+          >
             Settings
           </NavLink>
           <div className="nav-spacer" />
@@ -101,6 +131,7 @@ function App(): React.JSX.Element {
             <Route path="/logs" element={<LogsPage />} />
             <Route path="/logs/:nodeId" element={<LogsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/connect" element={<ConnectDevicePage />} />
           </Routes>
         </main>
 

@@ -1,5 +1,16 @@
 import { ElectronAPI } from '@electron-toolkit/preload'
-import type { Reading, StoredReading, Score, Alert, NodeRow, UserRow, Settings } from '../shared/types'
+import type {
+  Reading,
+  StoredReading,
+  Score,
+  Alert,
+  NodeRow,
+  UserRow,
+  Settings,
+  WifiNetwork,
+  WifiConnectionState,
+  NodeListMessage
+} from '../shared/types'
 
 interface CsvExportResult {
   canceled: boolean
@@ -24,6 +35,12 @@ interface AquaLoraApi {
   onNodeUpdated: (callback: (node: NodeRow) => void) => () => void
   getAllNodes: () => Promise<NodeRow[]>
   upsertNode: (id: string, name: string, location: string) => Promise<NodeRow>
+  scanWifi: () => Promise<WifiNetwork[]>
+  connectWifi: (ssid: string, password: string) => Promise<void>
+  getWifiStatus: () => Promise<WifiConnectionState>
+  openWifiSettings: () => Promise<void>
+  connectMasterNode: (url: string) => Promise<void>
+  onNodesDiscovered: (callback: (nodes: NodeListMessage['nodes']) => void) => () => void
   listUsers: () => Promise<UserRow[]>
   createUserAccount: (username: string, password: string, role: string) => Promise<void>
   deleteUserAccount: (id: number) => Promise<void>

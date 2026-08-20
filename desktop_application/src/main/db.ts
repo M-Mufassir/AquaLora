@@ -165,10 +165,12 @@ export function createUser(username: string, password: string, role = 'operator'
   )
 }
 
-export function verifyUser(username: string, password: string): { username: string; role: string } | null {
+export function verifyUser(
+  username: string,
+  password: string
+): { username: string; role: string } | null {
   const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username) as
-    | { username: string; password_hash: string; role: string }
-    | undefined
+    { username: string; password_hash: string; role: string } | undefined
   if (!user || !bcrypt.compareSync(password, user.password_hash)) return null
   return { username: user.username, role: user.role }
 }
@@ -190,7 +192,18 @@ export function getAllNodes(): NodeRow[] {
   return db.prepare('SELECT * FROM nodes ORDER BY id').all() as NodeRow[]
 }
 
-export function upsertNode(id: string, name: string, location: string): NodeRow {
+// Creates a node row from a discovery message if it doesn't exist yet;
+// leaves an existing row's name/location untouched. Discovery re-fires on
+// every WiFi reconnect, so this must not clobber a name the user later set.
+export function upsertNodeStub(id: string): NodeRow {
+  db.prepare(
+    `INSERT INTO nodes (id, status) VALUES (?, 'unknown')
+     ON CONFLICT(id) DO NOTHING`
+  ).run(id)
+  return db.prepare('SELECT * FROM nodes WHERE id = ?').get(id) as NodeRow
+}
+
+export function upsertNode(id: string, name: string | null, location: string | null): NodeRow {
   db.prepare(
     `INSERT INTO nodes (id, name, location, status)
      VALUES (?, ?, ?, 'unknown')
@@ -201,9 +214,17 @@ export function upsertNode(id: string, name: string, location: string): NodeRow 
 
 export function getSetting(key: string, fallback: string): string {
   const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as
-    | { value: string }
-    | undefined
+    { value: string } | undefined
   return row?.value ?? fallback
+}
+
+// Distinguishes "never paired" from "paired, has a value" — getSetting's
+// fallback can't do that, and startup needs to know whether to auto-connect
+// at all versus wait for the Connect Device wizard.
+export function getSettingOptional(key: string): string | null {
+  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as
+    { value: string } | undefined
+  return row?.value ?? null
 }
 
 export function setSetting(key: string, value: string): void {
