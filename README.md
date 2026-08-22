@@ -116,6 +116,8 @@ All four subsystems must agree on this shape. If any one changes it unilaterally
 { "type": "set_interval", "minutes": 30 }
 ```
 
+**Master ↔ Dashboard transport & security**: this hop (WiFi/WebSocket only — not the LoRa hop) is AES-256-GCM encrypted, keyed by deriving SHA-256 of the same WiFi password used to pair with the Master Node's own access point — no separate secret to provision. Both JSON shapes above travel as an encrypted `{"iv","tag","data"}` envelope on real hardware; a message that fails decryption/authentication (wrong key, or tampered in transit) is dropped rather than trusted. A third message type, `{"type":"node_list","nodes":[{"node_id":"..."}]}`, is sent once by the Master Node the instant the dashboard connects, so the dashboard can auto-detect however many sensor nodes exist without any manual setup. Full protocol/encryption/detection reference: `desktop_application/README.md` § "Data Transmission & Node Detection."
+
 **Dashboard → Decision Engine (local, not over the network):**
 
 ```json
@@ -157,13 +159,14 @@ Software (dashboard, decision engine) deliberately starts **before** hardware ex
 - **433 MHz LoRa over WiFi/cellular at the Slave Node** — longer wavelength penetrates obstacles better; no need for grid power or router coverage at the pond
 - **Two-way LoRa (uplink + downlink)** — not just telemetry; the dashboard can push sampling-interval changes back to the Slave Node, relayed during its brief post-transmission listen window
 - **Local SQLite as system of record, not cloud** — removes recurring subscription cost and continuous-connectivity dependency that every reviewed comparable system has
+- **AES-256-GCM over WSS/TLS for the Master↔Dashboard WiFi hop** — the Master Node broadcasts its own AP for the dashboard to pair with directly (no home router involved), and `WebSocketsServer` has no well-supported TLS mode on ESP32; deriving a symmetric key from the pairing password itself gives confidentiality and tamper detection without certificate management that a closed single-client AP link doesn't need
 - **Rule-based Fish Health Index over ML/fuzzy logic** — a 2025 comparative study found threshold rules score ~77.8% vs. fuzzy logic's ~89.6%; the accuracy trade-off is accepted deliberately in exchange for a system that runs on low-cost embedded hardware with no training dataset required
 - **ASA (not PLA) for the Slave Node enclosure** — UV/weather resistance for permanent outdoor deployment; Master Node uses standard PLA since it stays indoors
 - **Hand-soldered Vero board for this prototype phase** — a fabricated PCB's design-fab-ship cycle doesn't fit a 10-week timeline; a production PCB is named explicitly as future work, not hidden as a limitation
 
 ## 9. Known Limitations (stated honestly, not hidden)
 
-- LoRa uplink/downlink currently has no encryption or authentication — a pre-shared-key/checksum scheme is scoped as future work
+- LoRa uplink/downlink (Slave ↔ Master) currently has no encryption or authentication — a pre-shared-key/checksum scheme is scoped as future work. (The WiFi hop, Master ↔ Dashboard, is AES-256-GCM encrypted — see § 5 above — so this gap is specific to the LoRa segment.)
 - Sensor suite covers temperature, turbidity, and TDS only — dissolved oxygen and pH (ranked more physiologically critical in the literature) are future work
 - Validated in a controlled home-environment demo, not a live commercial farm, for this project phase
 

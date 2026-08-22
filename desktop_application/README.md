@@ -2,7 +2,7 @@
 
 Desktop dashboard application for **AquaLoRa** — a LoRa-based, solar-powered IoT system for real-time water quality monitoring and early-warning protection of fish and prawn ponds.
 
-This README covers (1) how this dashboard fits into the full AquaLoRa system, (2) this repo's own architecture, (3) what's been built so far and how to run it, and (4) what's left before this can go live on real hardware.
+This README covers (1) how this dashboard fits into the full AquaLoRa system, (2) this repo's own architecture, (3) what's been built so far and how to run it, (4) the exact wire protocol/encryption and node-detection techniques underneath the pairing flow, and (5) what's left before this can go live on real hardware.
 
 ---
 
@@ -42,37 +42,19 @@ Electron apps split into two isolated processes that only talk through a control
 
 ```
 src/
-<<<<<<< HEAD
-├── main/            Node.js backend — the only part allowed to touch the
-│   │                filesystem or network.
-│   ├── masterNodeClient.ts      WebSocket client to the Master Node,
-│   │                              writes readings to SQLite
-│   └── decisionEngineClient.ts   Spawns and talks to the Python decision
-│                                   engine (see Phase 6)
-=======
 ├── main/              Node.js backend — the only part allowed to touch the
 │                      filesystem or network. Owns:
 │                        - masterNodeClient.ts   WebSocket client to the Master Node
+│                        - secureChannel.ts      AES-256-GCM encrypt/decrypt for that link
 │                        - wifiManager.ts        OS-level WiFi scan/join (node-wifi)
 │                        - db.ts                 SQLite database (better-sqlite3)
 │                        - decisionEngine.ts      spawns the Python scorer, stdin/stdout
 │                        - index.ts               window, all ipcMain handlers
->>>>>>> df5cca1f21ece9976e42abae21e7a6d0f4427081
 │
 ├── preload/           Security bridge — exposes only specific, safe
 │                      functions from main to renderer (never the raw
 │                      Node.js APIs) via window.api
 │
-<<<<<<< HEAD
-└── renderer/         React + TypeScript UI — gauges, graphs, alerts.
-                       Never touches the network or filesystem directly;
-                       only receives data pushed from main.
-
-decision-engine/
-└── decision_engine.py   Fish Health Index scoring — persistent process,
-                           reads readings from stdin, writes scores to
-                           stdout (see Phase 6 for the pending formula note)
-=======
 ├── shared/            types.ts — the data contract types, plus pure helpers
 │                      (deriveStatusTier, deriveParamStatus) shared by main
 │                      and renderer so both sides agree on one definition
@@ -89,7 +71,6 @@ decision-engine/
 decision-engine/
 └── fish_health_index.py   Fish Health Index scorer (Member 4's subsystem —
                             see § 6, thresholds here are provisional)
->>>>>>> df5cca1f21ece9976e42abae21e7a6d0f4427081
 ```
 
 The Master Node firmware itself — including the dummy/testing sketch used to validate the pairing flow below — lives one level up, outside this subsystem, at `../firmware_design/master_node/` (see the root `README.md`'s Repository Structure). This repo (`desktop_application/`) only ever talks to it over WiFi/WebSocket; it never touches or builds the firmware.
@@ -188,43 +169,7 @@ Recharts line graphs per parameter with 1h/24h/7d/All range presets, and CSV exp
 
 `decision-engine/fish_health_index.py` is spawned once and scores every reading over stdin/stdout (line-delimited JSON). Warning/Critical alerts are written to `alerts` and pushed live. **Critical** additionally triggers a full-screen takeover with a generated alarm tone (Web Audio, no bundled asset), toggleable in Settings.
 
-<<<<<<< HEAD
-**Status: scaffolding done and tested; one formula pending team confirmation (see callout below).**
-
-The decision engine runs as a **persistent Python child process**, spawned once when the app starts and kept alive for its whole lifetime — not relaunched per reading, which would add Python's startup cost to every single sensor update. Communication happens over stdin/stdout as line-delimited JSON: `main` writes one reading per line to the process's stdin, the process writes one result per line back to stdout.
-
-**Files:**
-
-- `decision-engine/decision_engine.py` — the scoring logic itself
-- `src/main/decisionEngineClient.ts` — spawns the process, matches each request to its response, exposes `scoreReading()` to the rest of `main`
-
-**Wire it in** alongside your existing reading-received handler:
-
-```typescript
-// on app startup, alongside connectToMasterNode()
-startDecisionEngine();
-
-// in your reading-received handler, after insertReading.run(reading)
-const { score, status, recommendation } = await scoreReading(reading);
-if (status !== "Normal") {
-  insertAlert.run({
-    node_id: reading.node_id,
-    timestamp: reading.timestamp,
-    severity: status,
-    message: recommendation,
-  });
-  mainWindow.webContents.send("new-alert", { score, status, recommendation });
-}
-```
-
-> **⚠️ Pending confirmation — `to_subscore()` in `decision_engine.py`:** the ideal ranges and the 0.5/0.3/0.2 weights are settled, but the exact curve used to convert an out-of-range reading into a 0–100 sub-score (currently a simple linear falloff) has not been confirmed against Pratheesa's intended design. **Do not treat the current numbers as final** — this is the one function in this phase that's still open, everything else (the process lifecycle, the stdin/stdout framing, the Node-side integration) is stable and tested.
-
-**Before shipping — packaging note:** this assumes Python is installed on whoever runs the app. Before final distribution, bundle `decision_engine.py` with **PyInstaller** (`pyinstaller --onefile decision_engine.py`) into a standalone executable and spawn that instead of calling `python3` on a script — otherwise the app breaks on any machine without Python installed.
-
-**Done when:** artificially sending a bad reading through the mock server triggers a visible alert in the UI, end to end.
-=======
 ### ✅ Phase 7 — Remote Configuration (downlink)
->>>>>>> df5cca1f21ece9976e42abae21e7a6d0f4427081
 
 Sampling-interval control in the UI sends `set_interval` over the same WebSocket link; the mock server logs whatever it receives, same channel the real Master Node would use.
 
@@ -282,6 +227,78 @@ npm run build:win    # the above, then electron-builder — produces a distribut
 The SQLite file lives at `%APPDATA%/aqualora-dashboard/aqualora.db` (Windows) — delete it to reset the app to a fresh first-run state.
 
 To pair with real hardware instead of the mock server, see § "Real MCU pairing" above.
+
+---
+
+## 5. Data Transmission & Node Detection — Technical Reference
+
+This section is the detailed reference for exactly how bytes move between the Master Node and this dashboard, and exactly how a physical sensor node goes from "just started transmitting" to "visible in the UI." § 2's "Real MCU pairing" above covers the *user-facing* wizard flow; this covers the *wire protocol and detection logic* underneath it.
+
+### 5.1 Transport
+
+One WebSocket connection, opened by the dashboard (`src/main/masterNodeClient.ts`) as the client, to the Master Node (or the mock/dummy-firmware stand-in) acting as the server:
+
+- **Dev mock**: `ws://localhost:8081` — `mock_master_node.js`, `ws` npm package (`WebSocketServer`).
+- **Real/dummy hardware**: `ws://192.168.4.1:8081` — the fixed gateway address of the Master Node's own WiFi AP (`WiFi.softAP()` on ESP32 always hands out `192.168.4.1`), served by `WebSocketsServer` (Markus Sattler's Arduino library) in `firmware_design/master_node/AquaLoRa_MasterNode_Dummy/AquaLoRa_MasterNode_Dummy.ino`.
+
+There is exactly **one physical connection**, multiplexing every logical channel — discovery, every sensor node's periodic readings, and downlink commands all share this one socket. Messages are distinguished purely by JSON shape (a `type` field for non-`Reading` messages; `Reading` itself has no `type` and is the implicit default), not by separate ports or sub-connections. This keeps the protocol identical whether there are 1 or 40 Slave Nodes behind the Master Node — the dashboard never needs to know the node count up front, only how to react to whichever `node_id` shows up.
+
+`masterNodeClient` auto-reconnects 3s after any disconnect, and safely tears down (`removeAllListeners()` + `close()`) any existing socket before opening a new one — needed because `connect()` can now be called again mid-session when the user re-pairs to a different Master Node from the wizard, which never happened before this pairing flow existed.
+
+### 5.2 Message catalog
+
+| Message | Direction | `type` field | Sent by | Sent when | Handled by |
+| --- | --- | --- | --- | --- | --- |
+| `Reading` | Uplink | *(none — the default)* | Master Node | Once per sampling interval, per known sensor node (10s default in the mock/dummy firmware) | `masterNodeClient.onReading` → `db.upsertNodeFromReading` + `db.insertReading` → `decisionEngine.scoreReading` |
+| `NodeListMessage` | Uplink (discovery) | `"node_list"` | Master Node | Once, immediately on every new WebSocket connection | `masterNodeClient.onNodeList` → `db.upsertNodeStub` per node |
+| `SetIntervalCommand` | Downlink | `"set_interval"` | Dashboard | Whenever the user changes the sampling interval in the UI | Master Node applies it to its own send timer (LoRa firmware would relay it onward to the Slave Node) |
+
+`Reading`'s shape is the fixed data contract agreed with the LoRa/firmware team (§ 2, "Data contract") — `node_id`, `timestamp`, `temperature`, `turbidity`, `tds`, `battery_pct`, `rssi`. The other two are dashboard-internal protocol messages layered on top; they never travel over the LoRa hop, only the WiFi/WebSocket one.
+
+### 5.3 Encryption layer
+
+Every message in both directions is wrapped in an AES-256-GCM envelope before it hits the wire — implemented in `src/main/secureChannel.ts` on the dashboard side and mirrored line-for-line (same KDF, same envelope shape) in the firmware's `mbedtls`-based functions:
+
+```
+Dashboard                                          Master Node (ESP32 AP)
+    |                                                      |
+    |── WiFi join (node-wifi → netsh/nmcli/airport) ─────▶|   OS-level, not this protocol
+    |── WebSocket connect ws://192.168.4.1:8081 ─────────▶|
+    |                                                      |
+    |◀═ {"iv","tag","data"} — encrypted node_list ═════════|   discovery, sent once per connection
+    |   decrypt → upsertNodeStub() per node               |   UI shows "N nodes detected" immediately
+    |                                                      |
+    |◀═ {"iv","tag","data"} — encrypted Reading ═══════════|   periodic uplink, one per node per interval
+    |   decrypt → upsertNodeFromReading() + insertReading()|   (also the fallback detection path — see 5.4)
+    |                                                      |
+    |── {"iv","tag","data"} — encrypted set_interval ────▶|   downlink, applied to the send timer live
+```
+
+**Envelope**: `{ "iv": "<base64>", "tag": "<base64>", "data": "<base64>" }` — a fresh random 12-byte IV per message (`crypto.randomBytes` / `esp_random()`), the 16-byte GCM authentication tag, and the ciphertext. No additional authenticated data (AAD) is used.
+
+**Key derivation**: `SHA-256(WiFi AP password)` → a 32-byte AES-256 key. The *same password* the user types into the Connect Device wizard to join the Master Node's AP (`AP_PASSWORD` in the firmware sketch) is the pairing secret *and* the encryption secret — there's nothing separate to generate, distribute, or keep in sync between the dashboard and firmware. Changing the AP password on either side changes the key on both automatically, since both sides derive it the same way at connect time.
+
+**Persistence**: `master:connect` derives the key once and stores it — hex-encoded, alongside the paired URL — in the `settings` table (`master_node_key_hex`), so a restart reconnects encrypted without asking the user to retype the password. (This means the key sits in the local SQLite file in the clear, same trust boundary as everything else the dashboard stores — acceptable for a local single-machine app, not something to widen the exposure of.)
+
+**Failure handling**: `decryptMessage()` (dashboard) / `decryptEnvelope()` (firmware) return `null`/`false` on *any* failure — malformed envelope, wrong key, or a failed GCM auth-tag check (meaning the message was corrupted or forged) — and the caller just drops the message and logs why, rather than crashing the connection or trusting unverified data. This is what makes the auth tag meaningful: a tampered message doesn't silently decrypt to garbage that gets processed, it fails closed.
+
+**When it's skipped**: pairing with no password (the dev-only "Use local mock" shortcut, or an intentionally open MCU AP) falls back to plain JSON on both ends — `masterNodeClient.connect(url)` with no key, matching `mock_master_node.js`, which never speaks the encrypted envelope format at all.
+
+**Why AES-256-GCM over WSS/TLS**: a real TLS transport was considered and rejected for this phase — `WebSocketsServer` on ESP32 has no well-supported secure-server mode, and provisioning/rotating a certificate is disproportionate overhead for a closed, single-client AP link where the "network" is the AP itself. AES-256-GCM gives the properties that actually matter here (confidentiality + tamper detection) with an implementation that comfortably fits the chip and needs no PKI.
+
+### 5.4 Node detection techniques
+
+A sensor node's `nodes` row (§ 2, "Database schema") is created automatically — there is deliberately no manual "Add Node" UI (removed; a `node_id` is only ever something firmware assigns, never something a person types in). Two independent mechanisms feed it, and either one alone is sufficient:
+
+1. **Active discovery — the `node_list` message.** The Master Node enumerates every sensor node it currently knows about and sends it the instant a WebSocket connection opens (`WStype_CONNECTED` in the firmware). `masterNodeClient.onNodeList` calls `db.upsertNodeStub(node_id)` for each one — an `INSERT ... ON CONFLICT DO NOTHING`, so it only ever *creates* a row if missing and never overwrites an existing one's `name`/`location`. That matters because this message re-fires on **every** reconnect (including the 3s auto-retry), so it must not clobber a name the user set later. This is what makes the Connect Device wizard able to show "N nodes detected" within a couple of seconds, well before any node's first periodic `Reading` arrives.
+
+2. **Passive discovery — the first `Reading`.** `db.upsertNodeFromReading` fires on *every* incoming reading and does a full upsert: creates the row if it's the first time that `node_id` has been seen, and on every call (new or existing) stamps `last_seen`/`battery_pct`/`lora_rssi` and sets `status = 'online'`. This is the fallback path — a node that, for whatever reason, wasn't part of the Master Node's `node_list` snapshot (e.g. it joined the LoRa mesh after that list was built) still gets detected the moment its first reading successfully relays through.
+
+Both paths converge on the same `nodes` table and the same `node:updated` IPC push to the renderer, so the UI (Zustand's `knownNodes`) doesn't need to know or care which path created a given row.
+
+**Node loss (the inverse)** works the same way, by absence rather than presence: a 30s sweep (`markStaleNodesOffline`, `OFFLINE_THRESHOLD_MS = 5 * 60_000`) flips any node whose `last_seen` has gone stale from `'online'` to `'offline'`, pushed live via `node:status`. There's no separate heartbeat/keepalive protocol — "online" and "offline" are both just derived from *when a `Reading` last arrived for that `node_id`*.
+
+**Master Node detection** (a separate concern from sensor-*node* detection above — this is about finding the gateway device itself, before any of the above can even start) is a third technique: `wifiManager.scanNetworks()` lists nearby WiFi SSIDs via the OS (`node-wifi`, which drives `netsh` on Windows / `nmcli` on Linux / `airport` on macOS). The wizard applies a soft heuristic — any SSID matching `/aqualora/i` gets an `MCU` badge — to help the user spot the right network in a crowded list; it's a hint, not a filter, so any SSID can still be selected and joined.
 
 ---
 
