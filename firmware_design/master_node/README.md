@@ -6,11 +6,13 @@ Production firmware for the office gateway Master Node unit (**SLIIT IE3044 Desi
 
 ## 1. System Overview
 
-The Master Node acts as a dual-bridge telemetry gateway:
+The Master Node acts as the gateway between the pond-side slave nodes and the desktop application:
 
 1. **LoRa Receiver**: Receives 433 MHz RF packets over SPI from Slave Nodes (`"slave-01,25.40,320,1.50"`).
 2. **OLED Display Driver**: Renders live telemetry metrics and system status directly to a 1.3" SH1106 / 0.96" SSD1306 OLED screen (I2C).
-3. **Wi-Fi Access Point & WebSocket Gateway**: Runs its own Wi-Fi Access Point (`AquaLoRa-MasterNode`) and AES-256-GCM encrypted WebSocket server (`ws://192.168.4.1:8081`) to push live data to the desktop dashboard app.
+3. **External WiFi / WebSocket Gateway**: Connects to a normal farm or office WiFi network and exposes an AES-256-GCM encrypted WebSocket endpoint such as `ws://192.168.1.50:8081` for the desktop dashboard.
+
+This is the final deployment model used in the project: the Master Node joins an external WiFi network instead of depending on the ESP32 AP alone. The desktop app then connects to the Master Node over the LAN and syncs local readings to the cloud backend as a secondary backup.
 
 ---
 
@@ -91,14 +93,7 @@ master_node/
 
 ## 6. Pairing with Dashboard App
 
-### Option A — AP mode (original pairing method)
-
-1. Power the ESP32 Master Node.
-2. On your PC, connect to Wi-Fi SSID **`AquaLoRa-MasterNode`** (password: **`aqualora123`**).
-3. Open Desktop Application dashboard -> **Settings -> Connect Device**.
-4. Enter password `aqualora123` and connect. The dashboard links to `ws://192.168.4.1:8081` and streams live telemetry!
-
-### Option B — External WiFi / router mode (new deployment path)
+### External WiFi / router mode (final production path)
 
 1. Configure the ESP32 to join an external WiFi router by setting:
    - `WIFI_USE_EXTERNAL_NETWORK 1`
@@ -106,8 +101,15 @@ master_node/
    - `EXTERNAL_WIFI_PASSWORD = "YourRouterPassword"`
 2. Flash the firmware and power the ESP32.
 3. The ESP32 joins the router and assigns itself a LAN IP, for example `192.168.1.50`.
-4. In the dashboard, use the manual connection field and connect to:
-   `ws://192.168.1.50:8081`
-5. The dashboard now receives telemetry over the router instead of the ESP32's own access point.
+4. In the desktop app, open **Settings → Connection** and set:
+   - WiFi SSID = the same external WiFi network
+   - WiFi password = router password
+   - Master Node URL = `ws://192.168.1.50:8081`
+   - Cloud backup URL = `https://aqualora.up.railway.app`
+5. The desktop app connects to the Master Node over the router and begins local monitoring plus cloud sync.
 
-This mode is the correct choice for real deployments where the Master Node must send and receive data over normal office/home WiFi.
+This is the final architecture for the project: normal office/farm WiFi for the Master Node, local SQLite as the operational database, and the Railway backend as a cloud backup layer.
+
+### AP mode (legacy / fallback)
+
+AP mode is still supported as a fallback and troubleshooting mode, but it is no longer the primary deployment method for the final system. In AP mode, the ESP32 creates its own network and serves the dashboard at `ws://192.168.4.1:8081`.

@@ -289,13 +289,14 @@ app.whenReady().then(() => {
     soundEnabled: getSetting('sound_enabled', '1') === '1',
     savedWifiSsid: getSettingOptional('wifi_ssid'),
     savedWifiPassword: getSettingOptional('wifi_password'),
-    cloudSyncUrl: getSettingOptional('cloud_sync_url')
+    cloudSyncUrl: getSettingOptional('cloud_sync_url'),
+    masterNodeUrl: getSettingOptional('master_node_url')
   }))
   ipcMain.handle(
     'settings:set',
     (
       _event,
-      key: 'theme' | 'soundEnabled' | 'savedWifiSsid' | 'savedWifiPassword' | 'cloudSyncUrl',
+      key: 'theme' | 'soundEnabled' | 'savedWifiSsid' | 'savedWifiPassword' | 'cloudSyncUrl' | 'masterNodeUrl',
       value: string | boolean
     ) => {
       if (key === 'theme') setSetting('theme', String(value))
@@ -307,6 +308,7 @@ app.whenReady().then(() => {
         if (next) setSetting('cloud_sync_url', next)
         else setSetting('cloud_sync_url', '')
       }
+      if (key === 'masterNodeUrl') setSetting('master_node_url', String(value))
       mainWindow?.webContents.send('cloud:sync-status', getCloudSyncStatus())
     }
   )
@@ -402,9 +404,12 @@ app.whenReady().then(() => {
   const pairedMasterNodeUrl = getSettingOptional('master_node_url')
   if (pairedMasterNodeUrl) {
     const pairedKeyHex = getSettingOptional('master_node_key_hex')
+    const useKey = (pairedKeyHex && !(pairedMasterNodeUrl.includes('localhost') || pairedMasterNodeUrl.includes('127.0.0.1')))
+      ? Buffer.from(pairedKeyHex, 'hex')
+      : undefined
     masterNodeClient.connect(
       pairedMasterNodeUrl,
-      pairedKeyHex ? Buffer.from(pairedKeyHex, 'hex') : undefined
+      useKey
     )
   } else {
     console.log('[main] no paired Master Node yet — waiting for the Connect Device wizard')

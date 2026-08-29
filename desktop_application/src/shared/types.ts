@@ -156,6 +156,7 @@ export interface Settings {
   savedWifiSsid: string | null
   savedWifiPassword: string | null
   cloudSyncUrl: string | null
+  masterNodeUrl: string | null
 }
 
 export interface OutboxEntry {

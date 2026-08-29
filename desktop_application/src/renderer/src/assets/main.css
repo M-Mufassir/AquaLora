@@ -1220,6 +1220,71 @@ code {
   text-transform: uppercase;
 }
 
+.connection-panel {
+  gap: 18px;
+}
+
+.connection-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.connection-subtitle {
+  margin: 6px 0 0;
+  color: var(--ev-c-text-2);
+  font-size: 13px;
+}
+
+.connection-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.summary-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid rgba(134, 174, 202, 0.24);
+  background: linear-gradient(180deg, rgba(69, 137, 204, 0.08), rgba(18, 38, 49, 0.2));
+}
+
+.summary-card span {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ev-c-text-3);
+}
+
+.summary-card strong {
+  font-size: 13px;
+  color: #f4fbff;
+  word-break: break-word;
+}
+
+.connection-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 14px;
+}
+
+.connection-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.connection-field label {
+  font-size: 11px;
+  color: var(--ev-c-text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
 .settings-row {
   display: flex;
   align-items: center;

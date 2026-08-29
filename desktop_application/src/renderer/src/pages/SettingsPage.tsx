@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { useReadingsStore } from '../store/useReadingsStore'
 import ThemeToggle from '../components/ThemeToggle'
 import {
@@ -11,7 +10,7 @@ import {
   type PondThresholdProfile
 } from '../../../shared/types'
 
-type SettingsTab = 'default' | 'ponds' | 'thresholds'
+type SettingsTab = 'default' | 'connection' | 'ponds' | 'thresholds'
 
 type ThresholdTemplateDraft = {
   id?: number
@@ -27,7 +26,6 @@ const EMPTY_PROFILE: PondThresholdProfile = {
 }
 
 function SettingsPage(): React.JSX.Element {
-  const navigate = useNavigate()
   const settings = useReadingsStore((s) => s.settings)
   const knownNodes = useReadingsStore((s) => s.knownNodes)
   const removeNode = useReadingsStore((s) => s.removeNode)
@@ -45,9 +43,11 @@ function SettingsPage(): React.JSX.Element {
   const [savedWifiSsid, setSavedWifiSsid] = useState(settings.savedWifiSsid ?? '')
   const [savedWifiPassword, setSavedWifiPassword] = useState(settings.savedWifiPassword ?? '')
   const [cloudSyncUrl, setCloudSyncUrl] = useState(settings.cloudSyncUrl ?? '')
+  const [masterNodeUrl, setMasterNodeUrl] = useState(settings.masterNodeUrl ?? 'ws://localhost:8081')
   const [currentWifiSsid, setCurrentWifiSsid] = useState<string | null>(null)
   const [adminPassword, setAdminPassword] = useState('')
   const [adminFeedback, setAdminFeedback] = useState<string | null>(null)
+  const [connectionFeedback, setConnectionFeedback] = useState<string | null>(null)
   const [pondFeedback, setPondFeedback] = useState<string | null>(null)
   const [nameDrafts, setNameDrafts] = useState<Record<string, string>>({})
   const [locationDrafts, setLocationDrafts] = useState<Record<string, string>>({})
@@ -141,21 +141,35 @@ function SettingsPage(): React.JSX.Element {
     await window.api.setSetting('soundEnabled', next)
   }
 
-  async function handleSaveSavedWifi(): Promise<void> {
-    await window.api.setSetting('savedWifiSsid', savedWifiSsid)
+  async function handleSaveConnectionSettings(): Promise<void> {
+    const trimmedSsid = savedWifiSsid.trim()
+    const trimmedNodeUrl = masterNodeUrl.trim()
+    const trimmedCloudUrl = cloudSyncUrl.trim()
+
+    if (!trimmedSsid || !trimmedNodeUrl) {
+      setConnectionFeedback('WiFi SSID and Master Node URL are required.')
+      return
+    }
+
+    await window.api.setSetting('savedWifiSsid', trimmedSsid)
     await window.api.setSetting('savedWifiPassword', savedWifiPassword)
-    if (savedWifiSsid && savedWifiPassword) {
-      await window.api.connectWifi(savedWifiSsid, savedWifiPassword)
+    await window.api.setSetting('masterNodeUrl', trimmedNodeUrl)
+    if (trimmedCloudUrl) {
+      await window.api.setSetting('cloudSyncUrl', trimmedCloudUrl)
+    }
+
+    try {
+      await window.api.connectWifi(trimmedSsid, savedWifiPassword)
       const state = await window.api.getWifiStatus()
       setCurrentWifiSsid(state.ssid)
+      await window.api.connectMasterNode(trimmedNodeUrl, savedWifiPassword || undefined)
+      setConnectionFeedback('Connection settings saved and the app is trying to connect.')
+      const nextStatus = await window.api.getSyncStatus()
+      useReadingsStore.getState().setSyncStatus(nextStatus)
+    } catch (error) {
+      setConnectionFeedback('The connection could not be established. Check the WiFi SSID, password, and Master Node URL.')
+      console.error(error)
     }
-  }
-
-  async function handleSaveCloudSyncUrl(): Promise<void> {
-    const trimmed = cloudSyncUrl.trim()
-    await window.api.setSetting('cloudSyncUrl', trimmed)
-    const nextStatus = await window.api.getSyncStatus()
-    useReadingsStore.getState().setSyncStatus(nextStatus)
   }
 
   async function handleSyncNow(): Promise<void> {
@@ -343,6 +357,12 @@ function SettingsPage(): React.JSX.Element {
           Default
         </button>
         <button
+          className={`tab-btn${activeTab === 'connection' ? ' active' : ''}`}
+          onClick={() => setActiveTab('connection')}
+        >
+          Connection
+        </button>
+        <button
           className={`tab-btn${activeTab === 'ponds' ? ' active' : ''}`}
           onClick={() => setActiveTab('ponds')}
         >
@@ -396,20 +416,51 @@ function SettingsPage(): React.JSX.Element {
             </div>
           </section>
 
-          <section className="settings-section">
-            <h2>Saved WiFi Network</h2>
-            <div className="settings-row stacked">
-              <p className="status">
-                {currentWifiSsid ? `Currently connected: ${currentWifiSsid}` : 'No active WiFi connection'}
+        </>
+      )}
+
+      {activeTab === 'connection' && (
+        <section className="settings-section connection-panel">
+          <div className="connection-header">
+            <div>
+              <h2>Connection settings</h2>
+              <p className="connection-subtitle">
+                External WiFi-first deployment for the Master Node, desktop dashboard, and cloud backup.
               </p>
-              <label htmlFor="saved-wifi-ssid">SSID</label>
+            </div>
+            <span className={`status-pill ${currentWifiSsid ? 'online' : 'offline'}`}>
+              {currentWifiSsid ? 'Connected' : 'Not connected'}
+            </span>
+          </div>
+
+          <div className="connection-summary-grid">
+            <div className="summary-card">
+              <span>WiFi</span>
+              <strong>{currentWifiSsid ?? 'Not configured'}</strong>
+            </div>
+            <div className="summary-card">
+              <span>Master node</span>
+              <strong>{masterNodeUrl || 'Not set'}</strong>
+            </div>
+            <div className="summary-card">
+              <span>Cloud backup</span>
+              <strong>{cloudSyncUrl || 'Not configured'}</strong>
+            </div>
+          </div>
+
+          <div className="connection-grid">
+            <div className="connection-field">
+              <label htmlFor="saved-wifi-ssid">WiFi SSID</label>
               <input
                 id="saved-wifi-ssid"
                 value={savedWifiSsid}
                 onChange={(e) => setSavedWifiSsid(e.target.value)}
-                placeholder="MyHomeWiFi"
+                placeholder="AquaLoRa-Farm"
               />
-              <label htmlFor="saved-wifi-password">Password</label>
+            </div>
+
+            <div className="connection-field">
+              <label htmlFor="saved-wifi-password">WiFi Password</label>
               <input
                 id="saved-wifi-password"
                 type="password"
@@ -417,43 +468,37 @@ function SettingsPage(): React.JSX.Element {
                 onChange={(e) => setSavedWifiPassword(e.target.value)}
                 placeholder="••••••••"
               />
-              <button className="apply-btn" onClick={handleSaveSavedWifi}>Save & Connect</button>
             </div>
-          </section>
 
-          <section className="settings-section">
-            <h2>Cloud backup sync</h2>
-            <div className="settings-row stacked">
-              <p className="status">
-                {syncStatus.enabled
-                  ? `Pending: ${syncStatus.pendingCount} • Last synced: ${syncStatus.lastSyncedAt ? new Date(syncStatus.lastSyncedAt).toLocaleString() : 'never'}`
-                  : 'No cloud backup endpoint configured yet.'}
-              </p>
-              {syncStatus.lastError && <p className="status error-text">Last error: {syncStatus.lastError}</p>}
-              <label htmlFor="cloud-sync-url">Backup API URL</label>
+            <div className="connection-field">
+              <label htmlFor="master-node-url">Master Node WebSocket URL</label>
+              <input
+                id="master-node-url"
+                value={masterNodeUrl}
+                onChange={(e) => setMasterNodeUrl(e.target.value)}
+                placeholder="ws://192.168.1.50:8081"
+              />
+            </div>
+
+            <div className="connection-field">
+              <label htmlFor="cloud-sync-url">Cloud backup URL</label>
               <input
                 id="cloud-sync-url"
                 value={cloudSyncUrl}
                 onChange={(e) => setCloudSyncUrl(e.target.value)}
-                placeholder="https://example.com"
+                placeholder="https://aqualora.up.railway.app"
               />
-              <div className="pond-actions">
-                <button className="apply-btn" onClick={handleSaveCloudSyncUrl}>Save URL</button>
-                <button className="apply-btn" onClick={handleSyncNow} disabled={!syncStatus.enabled}>Sync now</button>
-              </div>
             </div>
-          </section>
+          </div>
 
-          <section className="settings-section">
-            <h2>Device Connection</h2>
-            <div className="settings-row">
-              <span>Pair with a different Master Node, or re-run the setup wizard</span>
-              <button className="apply-btn" onClick={() => navigate('/connect')}>
-                Connect Device
-              </button>
-            </div>
-          </section>
-        </>
+          <div className="pond-actions">
+            <button className="apply-btn" onClick={handleSaveConnectionSettings}>Save & Connect</button>
+            <button className="apply-btn" onClick={handleSyncNow} disabled={!syncStatus.enabled}>Sync now</button>
+          </div>
+
+          {connectionFeedback && <p className="status success-text">{connectionFeedback}</p>}
+          {syncStatus.lastError && <p className="status error-text">Last error: {syncStatus.lastError}</p>}
+        </section>
       )}
 
       {activeTab === 'ponds' && (

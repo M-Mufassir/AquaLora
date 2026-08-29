@@ -61,7 +61,8 @@ export const useReadingsStore = create<AppState>((set, get) => ({
     soundEnabled: true,
     savedWifiSsid: null,
     savedWifiPassword: null,
-    cloudSyncUrl: null
+    cloudSyncUrl: null,
+    masterNodeUrl: null
   },
   syncStatus: {
     enabled: false,

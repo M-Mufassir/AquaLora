@@ -50,7 +50,7 @@ interface AquaLoraApi {
   changeUserPassword: (username: string, newPassword: string) => Promise<void>
   getSettings: () => Promise<Settings>
   setSetting: (
-    key: 'theme' | 'soundEnabled' | 'savedWifiSsid' | 'savedWifiPassword' | 'cloudSyncUrl',
+    key: 'theme' | 'soundEnabled' | 'savedWifiSsid' | 'savedWifiPassword' | 'cloudSyncUrl' | 'masterNodeUrl',
     value: string | boolean
   ) => Promise<void>
   getSyncStatus: () => Promise<CloudSyncStatus>

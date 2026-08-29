@@ -6,7 +6,8 @@
 // set_interval) received from the dashboard.
 const { WebSocketServer } = require('ws')
 
-const PORT = 8081
+// Port can be overridden via the PORT environment variable for testing purposes
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 8081
 const SEND_INTERVAL_MS = 10000
 
 // Value ranges per node — tuned (and statistically validated against
@@ -17,26 +18,38 @@ const NODES = [
     node_id: 'slave-01',
     temperature: [24, 31],
     turbidity: [5, 60],
-    tds: [150, 320]
+    tds: [150, 320],
+    ph: [6.5, 8.5]
   }, // mixed — mostly Good, occasional Warning
   {
     node_id: 'slave-02',
     temperature: [27, 29],
     turbidity: [5, 18],
-    tds: [180, 260]
+    tds: [180, 260],
+    ph: [7.0, 8.0]
   }, // healthy — consistently Good
   {
     node_id: 'slave-03',
     temperature: [23, 33],
     turbidity: [28, 50],
-    tds: [200, 360]
+    tds: [200, 360],
+    ph: [6.8, 8.2]
   }, // borderline — ~24% Warning
   {
     node_id: 'slave-04',
     temperature: [19, 36],
     turbidity: [35, 65],
-    tds: [60, 430]
-  } // unhealthy — ~51% Warning, ~24% Critical
+    tds: [60, 430],
+    ph: [6.0, 9.0]
+  }, // unhealthy — ~51% Warning, ~24% Critical
+  // New pH‑only sensor node for testing
+  {
+    node_id: 'ph-sensor-01',
+    temperature: [20, 25], // optional placeholder values
+    turbidity: [10, 20],
+    tds: [100, 200],
+    ph: [5.5, 9.5]
+  }
 ]
 
 const wss = new WebSocketServer({ port: PORT })
@@ -54,6 +67,7 @@ function buildReading(profile) {
     temperature: randomInRange(profile.temperature),
     turbidity: randomInRange(profile.turbidity),
     tds: Math.round(randomInRange(profile.tds)),
+    ph: profile.ph ? randomInRange(profile.ph) : undefined,
     battery_pct: Math.round(randomInRange([60, 100])),
     rssi: Math.round(randomInRange([-90, -50]))
   }

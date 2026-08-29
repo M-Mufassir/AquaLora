@@ -158,14 +158,16 @@ export function upsertNodeFromReading(reading: Reading): NodeRow {
 }
 
 export function insertReading(reading: Reading): number {
+  // Ensure pond_type is defined; default to 'tilapia' for legacy readings
+  const enrichedReading = { ...reading, pond_type: (reading as any).pond_type ?? 'tilapia' } as any;
   const result = db.prepare(
     `INSERT INTO readings (node_id, timestamp, temperature, turbidity, tds, ph, pond_type)
      VALUES (@node_id, @timestamp, @temperature, @turbidity, @tds, @ph, @pond_type)`
-  ).run(reading)
+  ).run(enrichedReading)
 
   const readingId = Number(result.lastInsertRowid ?? 0)
   if (readingId > 0) {
-    queueOutboxEntryForReading(readingId, reading)
+    queueOutboxEntryForReading(readingId, enrichedReading)
   }
   return readingId
 }

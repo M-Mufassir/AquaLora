@@ -25,6 +25,10 @@ export class MasterNodeClient {
   // speaks plain JSON — mirroring the two states the wizard can leave a
   // pairing in.
   connect(url: string = DEFAULT_MOCK_URL, encryptionKey?: Buffer): void {
+    // If we are connecting to a local mock server, ignore any stored encryption key.
+    if (url.includes('localhost') || url.includes('127.0.0.1')) {
+      encryptionKey = undefined;
+    }
     // Tear down any existing connection first — connect() can now be called
     // again mid-session when the user re-pairs to a different Master Node
     // from the Connect Device wizard, which never happened before.

@@ -108,7 +108,7 @@ const api = {
     ipcRenderer.invoke('users:changePassword', username, newPassword),
   getSettings: (): Promise<Settings> => ipcRenderer.invoke('settings:get'),
   setSetting: (
-    key: 'theme' | 'soundEnabled' | 'savedWifiSsid' | 'savedWifiPassword' | 'cloudSyncUrl',
+    key: 'theme' | 'soundEnabled' | 'savedWifiSsid' | 'savedWifiPassword' | 'cloudSyncUrl' | 'masterNodeUrl',
     value: string | boolean
   ): Promise<void> => ipcRenderer.invoke('settings:set', key, value),
   getSyncStatus: (): Promise<CloudSyncStatus> => ipcRenderer.invoke('cloud:sync-status'),
