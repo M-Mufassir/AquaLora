@@ -1,7 +1,6 @@
 import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
 import { join } from 'path'
 import { writeFileSync } from 'fs'
-import { randomBytes } from 'crypto'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import {
@@ -23,11 +22,24 @@ import {
   deleteUser,
   changePassword,
   getAllNodes,
+  getThresholdProfiles,
+  saveThresholdProfile,
+  deleteThresholdProfile,
   upsertNode,
   upsertNodeStub,
   getSetting,
   getSettingOptional,
-  setSetting
+  setSetting,
+  setNodePondType,
+  getNodePondType,
+  getNodeCustomProfile,
+  setNodeCustomProfile,
+  deleteNodeReadings,
+  deleteNode,
+  getPendingOutboxEntries,
+  getCloudSyncStatus,
+  markOutboxSynced,
+  markOutboxFailed
 } from './db'
 import { MasterNodeClient } from './masterNodeClient'
 import { DecisionEngine } from './decisionEngine'
@@ -37,10 +49,49 @@ import type { Score } from '../shared/types'
 
 const OFFLINE_CHECK_INTERVAL_MS = 30_000
 const OFFLINE_THRESHOLD_MS = 5 * 60_000
+const CLOUD_SYNC_INTERVAL_MS = 2 * 60_000
 
 let mainWindow: BrowserWindow
 const masterNodeClient = new MasterNodeClient()
 const decisionEngine = new DecisionEngine()
+
+async function syncQueuedReadings(): Promise<void> {
+  const baseUrl = getSettingOptional('cloud_sync_url')?.trim()
+  if (!baseUrl) {
+    return
+  }
+
+  const pendingEntries = getPendingOutboxEntries(100)
+  if (pendingEntries.length === 0) {
+    const status = getCloudSyncStatus()
+    mainWindow?.webContents.send('cloud:sync-status', status)
+    return
+  }
+
+  const syncUrl = new URL('/readings/sync', baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`).toString()
+  const readings = pendingEntries.map((entry) => JSON.parse(entry.payload_json))
+
+  try {
+    const response = await fetch(syncUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ readings })
+    })
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+    }
+
+    markOutboxSynced(pendingEntries.map((entry) => entry.id))
+    mainWindow?.webContents.send('cloud:sync-status', getCloudSyncStatus())
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown cloud sync error'
+    for (const entry of pendingEntries) {
+      markOutboxFailed(entry.id, message)
+    }
+    mainWindow?.webContents.send('cloud:sync-status', getCloudSyncStatus())
+  }
+}
 
 function createWindow(): void {
   // Create the browser window. Starts maximized — this is a monitoring
@@ -98,11 +149,8 @@ app.whenReady().then(() => {
   initDb()
 
   if (userCount() === 0) {
-    const defaultPassword = randomBytes(6).toString('hex')
-    createUser('admin', defaultPassword, 'admin')
-    console.log(
-      `[auth] no users found — created default account. username: admin  password: ${defaultPassword}`
-    )
+    createUser('Admin', 'Admin123', 'admin')
+    console.log('[auth] default admin account created: username=Admin password=Admin123')
   }
 
   ipcMain.handle('auth:login', (_event, username: string, password: string) =>
@@ -150,6 +198,11 @@ app.whenReady().then(() => {
   ipcMain.handle('nodes:upsert', (_event, id: string, name: string, location: string) =>
     upsertNode(id, name, location)
   )
+  ipcMain.handle('thresholds:list', () => getThresholdProfiles())
+  ipcMain.handle('thresholds:save', (_event, name: string, profile: any) =>
+    saveThresholdProfile(name, profile)
+  )
+  ipcMain.handle('thresholds:delete', (_event, id: number) => deleteThresholdProfile(id))
 
   ipcMain.handle('wifi:scan', () => scanNetworks())
   ipcMain.handle('wifi:connect', (_event, ssid: string, password: string) =>
@@ -188,15 +241,55 @@ app.whenReady().then(() => {
 
   ipcMain.handle('settings:get', () => ({
     theme: getSetting('theme', 'dark'),
-    soundEnabled: getSetting('sound_enabled', '1') === '1'
+    soundEnabled: getSetting('sound_enabled', '1') === '1',
+    savedWifiSsid: getSettingOptional('wifi_ssid'),
+    savedWifiPassword: getSettingOptional('wifi_password'),
+    cloudSyncUrl: getSettingOptional('cloud_sync_url')
   }))
   ipcMain.handle(
     'settings:set',
-    (_event, key: 'theme' | 'soundEnabled', value: string | boolean) => {
+    (
+      _event,
+      key: 'theme' | 'soundEnabled' | 'savedWifiSsid' | 'savedWifiPassword' | 'cloudSyncUrl',
+      value: string | boolean
+    ) => {
       if (key === 'theme') setSetting('theme', String(value))
       if (key === 'soundEnabled') setSetting('sound_enabled', value ? '1' : '0')
+      if (key === 'savedWifiSsid') setSetting('wifi_ssid', String(value))
+      if (key === 'savedWifiPassword') setSetting('wifi_password', String(value))
+      if (key === 'cloudSyncUrl') {
+        const next = String(value).trim()
+        if (next) setSetting('cloud_sync_url', next)
+        else setSetting('cloud_sync_url', '')
+      }
+      mainWindow?.webContents.send('cloud:sync-status', getCloudSyncStatus())
     }
   )
+
+  ipcMain.handle('cloud:sync-status', () => getCloudSyncStatus())
+  ipcMain.handle('cloud:sync', async () => {
+    await syncQueuedReadings()
+    return getCloudSyncStatus()
+  })
+
+  ipcMain.handle('nodes:setPondType', (_event, nodeId: string, pondType: string) =>
+    setNodePondType(nodeId, pondType)
+  )
+  ipcMain.handle('nodes:getPondType', (_event, nodeId: string) => getNodePondType(nodeId))
+  ipcMain.handle('nodes:getCustomProfile', (_event, nodeId: string) => getNodeCustomProfile(nodeId))
+  ipcMain.handle('nodes:setCustomProfile', (_event, nodeId: string, profile: any) =>
+    setNodeCustomProfile(nodeId, profile)
+  )
+  ipcMain.handle('nodes:deleteReadings', (_event, nodeId: string) => deleteNodeReadings(nodeId))
+  ipcMain.handle('nodes:delete', (_event, nodeId: string) => deleteNode(nodeId))
+
+  const savedWifiSsid = getSettingOptional('wifi_ssid')
+  const savedWifiPassword = getSettingOptional('wifi_password')
+  if (savedWifiSsid && savedWifiPassword) {
+    connectToNetwork(savedWifiSsid, savedWifiPassword).catch((err) => {
+      console.warn('[main] saved WiFi connection failed:', err)
+    })
+  }
 
   decisionEngine.start()
 
@@ -282,6 +375,12 @@ app.whenReady().then(() => {
       console.error('[main] offline check failed:', err)
     }
   }, OFFLINE_CHECK_INTERVAL_MS)
+
+  setInterval(() => {
+    void syncQueuedReadings()
+  }, CLOUD_SYNC_INTERVAL_MS)
+
+  void syncQueuedReadings()
 
   createWindow()
 

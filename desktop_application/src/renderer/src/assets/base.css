@@ -5,20 +5,20 @@
    changes. Status and categorical (parameter) colors are separate systems
    on purpose — status never doubles as a series color. */
 :root {
-  --color-background: #0d0d0d;
-  --color-surface: #1a1a19;
-  --color-background-soft: #201f1e;
-  --color-background-mute: #1a1a19;
+  --color-background: #061b22;
+  --color-surface: #0d2a34;
+  --color-background-soft: #123441;
+  --color-background-mute: #0f2f39;
 
-  --ev-c-gray-3: #242423;
-  --ev-c-gray-2: #2c2c2a;
-  --ev-c-gray-1: #383835;
+  --ev-c-gray-3: #1f4250;
+  --ev-c-gray-2: #285b6c;
+  --ev-c-gray-1: #3a7a8d;
 
-  --ev-c-text-1: #ffffff;
-  --ev-c-text-2: #c3c2b7;
-  --ev-c-text-3: #898781;
+  --ev-c-text-1: #edf8ff;
+  --ev-c-text-2: #c4dfe8;
+  --ev-c-text-3: #8fb4c0;
 
-  --color-border: rgba(255, 255, 255, 0.1);
+  --color-border: rgba(196, 223, 232, 0.16);
 
   --ev-button-alt-border: transparent;
   --ev-button-alt-text: var(--ev-c-text-1);
@@ -27,10 +27,9 @@
   --ev-button-alt-hover-text: var(--ev-c-text-1);
   --ev-button-alt-hover-bg: var(--ev-c-gray-2);
 
-  /* Categorical — which parameter (identity), never health */
-  --cat-temperature: #3987e5;
-  --cat-turbidity: #d95926;
-  --cat-tds: #199e70;
+  --cat-temperature: #4aa8ff;
+  --cat-turbidity: #ff8a65;
+  --cat-tds: #38d39f;
 
   --color-text: var(--ev-c-text-1);
 }
@@ -45,27 +44,27 @@
 }
 
 :root[data-theme='light'] {
-  --color-background: #f9f9f7;
-  --color-surface: #fcfcfb;
-  --color-background-soft: #f3f3f0;
-  --color-background-mute: #fcfcfb;
+  --color-background: #edf7fb;
+  --color-surface: #ffffff;
+  --color-background-soft: #f4fbff;
+  --color-background-mute: #f8fcff;
 
-  --ev-c-gray-3: #efeee9;
-  --ev-c-gray-2: #e1e0d9;
-  --ev-c-gray-1: #c3c2b7;
+  --ev-c-gray-3: #dfeef5;
+  --ev-c-gray-2: #d0e6ef;
+  --ev-c-gray-1: #bdd9e6;
 
-  --ev-c-text-1: #0b0b0b;
-  --ev-c-text-2: #52514e;
-  --ev-c-text-3: #898781;
+  --ev-c-text-1: #12313d;
+  --ev-c-text-2: #3d5d69;
+  --ev-c-text-3: #6d8b97;
 
-  --color-border: rgba(11, 11, 11, 0.1);
+  --color-border: rgba(18, 49, 61, 0.12);
 
   --ev-button-alt-bg: var(--ev-c-gray-3);
   --ev-button-alt-hover-bg: var(--ev-c-gray-2);
 
-  --cat-temperature: #2a78d6;
-  --cat-turbidity: #eb6834;
-  --cat-tds: #1baf7a;
+  --cat-temperature: #2976d6;
+  --cat-turbidity: #e16446;
+  --cat-tds: #20a479;
 }
 
 *,

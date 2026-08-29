@@ -10,7 +10,8 @@ import type {
   Settings,
   WifiNetwork,
   WifiConnectionState,
-  NodeListMessage
+  NodeListMessage,
+  CloudSyncStatus
 } from '../shared/types'
 
 interface CsvExportResult {
@@ -79,6 +80,11 @@ const api = {
     return () => ipcRenderer.removeListener('node:updated', listener)
   },
   getAllNodes: (): Promise<NodeRow[]> => ipcRenderer.invoke('nodes:getAll'),
+  getThresholdProfiles: (): Promise<any[]> => ipcRenderer.invoke('thresholds:list'),
+  saveThresholdProfile: (name: string, profile: any): Promise<any> =>
+    ipcRenderer.invoke('thresholds:save', name, profile),
+  deleteThresholdProfile: (id: number): Promise<number> =>
+    ipcRenderer.invoke('thresholds:delete', id),
   upsertNode: (id: string, name: string, location: string): Promise<NodeRow> =>
     ipcRenderer.invoke('nodes:upsert', id, name, location),
   scanWifi: (): Promise<WifiNetwork[]> => ipcRenderer.invoke('wifi:scan'),
@@ -101,8 +107,28 @@ const api = {
   changeUserPassword: (username: string, newPassword: string): Promise<void> =>
     ipcRenderer.invoke('users:changePassword', username, newPassword),
   getSettings: (): Promise<Settings> => ipcRenderer.invoke('settings:get'),
-  setSetting: (key: 'theme' | 'soundEnabled', value: string | boolean): Promise<void> =>
-    ipcRenderer.invoke('settings:set', key, value)
+  setSetting: (
+    key: 'theme' | 'soundEnabled' | 'savedWifiSsid' | 'savedWifiPassword' | 'cloudSyncUrl',
+    value: string | boolean
+  ): Promise<void> => ipcRenderer.invoke('settings:set', key, value),
+  getSyncStatus: (): Promise<CloudSyncStatus> => ipcRenderer.invoke('cloud:sync-status'),
+  syncCloudReadings: (): Promise<CloudSyncStatus> => ipcRenderer.invoke('cloud:sync'),
+  onSyncStatus: (callback: (status: CloudSyncStatus) => void): (() => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, status: CloudSyncStatus): void =>
+      callback(status)
+    ipcRenderer.on('cloud:sync-status', listener)
+    return () => ipcRenderer.removeListener('cloud:sync-status', listener)
+  },
+  getNodePondType: (nodeId: string): Promise<string | null> =>
+    ipcRenderer.invoke('nodes:getPondType', nodeId),
+  getNodeCustomProfile: (nodeId: string): Promise<any> => ipcRenderer.invoke('nodes:getCustomProfile', nodeId),
+  setNodePondType: (nodeId: string, pondType: string): Promise<NodeRow> =>
+    ipcRenderer.invoke('nodes:setPondType', nodeId, pondType),
+  setNodeCustomProfile: (nodeId: string, profile: any): Promise<NodeRow> =>
+    ipcRenderer.invoke('nodes:setCustomProfile', nodeId, profile),
+  deleteNodeReadings: (nodeId: string): Promise<number> =>
+    ipcRenderer.invoke('nodes:deleteReadings', nodeId),
+  deleteNode: (nodeId: string): Promise<number> => ipcRenderer.invoke('nodes:delete', nodeId)
 }
 
 // Use `contextBridge` APIs to expose Electron APIs to

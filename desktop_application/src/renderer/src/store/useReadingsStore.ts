@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Reading, Score, Alert, NodeRow, Settings } from '../../../shared/types'
+import type { Reading, Score, Alert, NodeRow, Settings, CloudSyncStatus } from '../../../shared/types'
 
 export interface NodeStatus {
   online: boolean
@@ -30,6 +30,7 @@ interface AppState {
   alerts: Alert[]
   linkStatus: LinkStatus
   settings: Settings
+  syncStatus: CloudSyncStatus
   currentUser: CurrentUser | null
 
   setCurrentUser: (user: CurrentUser | null) => void
@@ -42,9 +43,12 @@ interface AppState {
   setNodeOffline: (nodeId: string) => void
   setKnownNodes: (nodes: NodeRow[]) => void
   upsertKnownNode: (node: NodeRow) => void
+  removeNode: (nodeId: string) => void
+  clearNodeReadings: (nodeId: string) => void
   setSettings: (settings: Settings) => void
   setTheme: (theme: 'light' | 'dark') => void
   setSoundEnabled: (enabled: boolean) => void
+  setSyncStatus: (status: CloudSyncStatus) => void
 }
 
 export const useReadingsStore = create<AppState>((set, get) => ({
@@ -52,7 +56,20 @@ export const useReadingsStore = create<AppState>((set, get) => ({
   knownNodes: [],
   alerts: [],
   linkStatus: 'connected',
-  settings: { theme: 'dark', soundEnabled: true },
+  settings: {
+    theme: 'dark',
+    soundEnabled: true,
+    savedWifiSsid: null,
+    savedWifiPassword: null,
+    cloudSyncUrl: null
+  },
+  syncStatus: {
+    enabled: false,
+    pendingCount: 0,
+    lastSyncedAt: null,
+    lastError: null,
+    url: null
+  },
   currentUser: null,
 
   setCurrentUser: (user) => set({ currentUser: user }),
@@ -111,8 +128,21 @@ export const useReadingsStore = create<AppState>((set, get) => ({
         a.id.localeCompare(b.id)
       )
     })),
+  removeNode: (nodeId) =>
+    set((s) => ({
+      knownNodes: s.knownNodes.filter((n) => n.id !== nodeId),
+      nodesById: Object.fromEntries(Object.entries(s.nodesById).filter(([id]) => id !== nodeId))
+    })),
+  clearNodeReadings: (nodeId) =>
+    set((s) => ({
+      nodesById: {
+        ...s.nodesById,
+        [nodeId]: { ...(s.nodesById[nodeId] ?? EMPTY_NODE_STATE), latest: null, latestScore: null }
+      }
+    })),
 
   setSettings: (settings) => set({ settings }),
   setTheme: (theme) => set((s) => ({ settings: { ...s.settings, theme } })),
-  setSoundEnabled: (soundEnabled) => set((s) => ({ settings: { ...s.settings, soundEnabled } }))
+  setSoundEnabled: (soundEnabled) => set((s) => ({ settings: { ...s.settings, soundEnabled } })),
+  setSyncStatus: (syncStatus) => set({ syncStatus })
 }))

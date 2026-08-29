@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { deriveStatusTier, deriveParamStatus } from '../../../shared/types'
+import { deriveStatusTier, deriveParamStatus, POND_LABELS } from '../../../shared/types'
 import type { NodeRow } from '../../../shared/types'
 import type { NodeState } from '../store/useReadingsStore'
 import Gauge from './Gauge'
@@ -23,10 +23,17 @@ function NodeSummaryCard({ node, state }: NodeSummaryCardProps): React.JSX.Eleme
   return (
     <Link to={`/logs/${node.id}`} className={`node-summary-card tier-${tier.toLowerCase()}`}>
       <div className="node-summary-header">
-        <span className="node-summary-name">{node.name || node.id}</span>
+        <div className="node-summary-title-wrap">
+          <span className="node-summary-name">{node.name || node.id}</span>
+          <span className="node-summary-subtitle">{node.location || 'No location set'}</span>
+        </div>
         <span className={`tier-badge tier-${tier.toLowerCase()}`}>{tier}</span>
       </div>
-      {node.location && <span className="node-summary-location">{node.location}</span>}
+
+      <div className="node-summary-tags">
+        <span className="node-summary-tag">{node.pond_type ? POND_LABELS[node.pond_type] : 'Unassigned'}</span>
+        <span className="node-summary-tag muted">{state.status.online ? 'Online' : 'Offline'}</span>
+      </div>
 
       {state.latest ? (
         <>

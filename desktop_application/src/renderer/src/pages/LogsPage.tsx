@@ -45,55 +45,80 @@ function LogsPage(): React.JSX.Element {
           </p>
         ) : (
           <>
-            <div className="logs-detail-header">
-              <h1>{selectedNode.name || selectedNode.id}</h1>
-              <span className={`tier-badge tier-${tier.toLowerCase()}`}>{tier}</span>
+            <div className="detail-hero">
+              <div className="detail-hero-content">
+                <div className="detail-topline">
+                  <span className="section-kicker">Node Overview</span>
+                  <span className={`tier-badge tier-${tier.toLowerCase()}`}>{tier}</span>
+                </div>
+                <h1>{selectedNode.name || selectedNode.id}</h1>
+                <div className="detail-meta-row">
+                  {selectedNode.location && <span>{selectedNode.location}</span>}
+                  <span>ID: {selectedNode.id}</span>
+                  <span>{selectedNode.pond_type ? selectedNode.pond_type.toUpperCase() : 'UNASSIGNED'}</span>
+                </div>
+              </div>
+              <div className="detail-stat-grid">
+                <div className="detail-stat-pill">
+                  <span className="detail-stat-label">Battery</span>
+                  <strong>{state.status.batteryPct ?? '--'}%</strong>
+                </div>
+                <div className="detail-stat-pill">
+                  <span className="detail-stat-label">Signal</span>
+                  <strong>{state.status.rssi ?? '--'} dBm</strong>
+                </div>
+                <div className="detail-stat-pill">
+                  <span className="detail-stat-label">Last Seen</span>
+                  <strong>{state.status.lastSeen ? new Date(state.status.lastSeen).toLocaleString() : 'Never'}</strong>
+                </div>
+              </div>
             </div>
-            {selectedNode.location && (
-              <p className="node-summary-location">{selectedNode.location}</p>
-            )}
 
             <NodeStatusBar nodeId={selectedNode.id} status={state.status} />
             <AlertList alerts={nodeAlerts} onAcknowledge={handleAcknowledge} />
 
-            <h2 className="home-section-title">Live</h2>
-            {state.latest ? (
-              <div className="gauges">
-                <Gauge
-                  label="Temperature"
-                  value={state.latest.temperature}
-                  unit="°C"
-                  min={0}
-                  max={40}
-                  status={deriveParamStatus(state.latestScore, 'temperature')}
-                  accent="var(--cat-temperature)"
-                />
-                <Gauge
-                  label="Turbidity"
-                  value={state.latest.turbidity}
-                  unit="NTU"
-                  min={0}
-                  max={100}
-                  status={deriveParamStatus(state.latestScore, 'turbidity')}
-                  accent="var(--cat-turbidity)"
-                />
-                <Gauge
-                  label="TDS"
-                  value={state.latest.tds}
-                  unit="ppm"
-                  min={0}
-                  max={500}
-                  decimals={0}
-                  status={deriveParamStatus(state.latestScore, 'tds')}
-                  accent="var(--cat-tds)"
-                />
-              </div>
-            ) : (
-              <p className="status">Waiting for a reading from this node...</p>
-            )}
+            <div className="detail-panel-block">
+              <h2 className="home-section-title">Live</h2>
+              {state.latest ? (
+                <div className="gauges">
+                  <Gauge
+                    label="Temperature"
+                    value={state.latest.temperature}
+                    unit="°C"
+                    min={0}
+                    max={40}
+                    status={deriveParamStatus(state.latestScore, 'temperature')}
+                    accent="var(--cat-temperature)"
+                  />
+                  <Gauge
+                    label="Turbidity"
+                    value={state.latest.turbidity}
+                    unit="NTU"
+                    min={0}
+                    max={100}
+                    status={deriveParamStatus(state.latestScore, 'turbidity')}
+                    accent="var(--cat-turbidity)"
+                  />
+                  <Gauge
+                    label="TDS"
+                    value={state.latest.tds}
+                    unit="ppm"
+                    min={0}
+                    max={500}
+                    decimals={0}
+                    status={deriveParamStatus(state.latestScore, 'tds')}
+                    accent="var(--cat-tds)"
+                  />
+                </div>
+              ) : (
+                <p className="status">Waiting for a reading from this node...</p>
+              )}
+            </div>
 
-            <h2 className="home-section-title">History</h2>
-            <HistoryPanel nodeId={selectedNode.id} />
+            <div className="detail-panel-block">
+              <h2 className="home-section-title">History</h2>
+              <HistoryPanel nodeId={selectedNode.id} />
+            </div>
           </>
         )}
       </section>

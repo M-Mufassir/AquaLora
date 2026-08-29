@@ -34,6 +34,9 @@ interface AquaLoraApi {
   onNodeStatus: (callback: (update: { node_id: string; online: boolean }) => void) => () => void
   onNodeUpdated: (callback: (node: NodeRow) => void) => () => void
   getAllNodes: () => Promise<NodeRow[]>
+  getThresholdProfiles: () => Promise<any[]>
+  saveThresholdProfile: (name: string, profile: any) => Promise<any>
+  deleteThresholdProfile: (id: number) => Promise<number>
   upsertNode: (id: string, name: string, location: string) => Promise<NodeRow>
   scanWifi: () => Promise<WifiNetwork[]>
   connectWifi: (ssid: string, password: string) => Promise<void>
@@ -46,7 +49,19 @@ interface AquaLoraApi {
   deleteUserAccount: (id: number) => Promise<void>
   changeUserPassword: (username: string, newPassword: string) => Promise<void>
   getSettings: () => Promise<Settings>
-  setSetting: (key: 'theme' | 'soundEnabled', value: string | boolean) => Promise<void>
+  setSetting: (
+    key: 'theme' | 'soundEnabled' | 'savedWifiSsid' | 'savedWifiPassword' | 'cloudSyncUrl',
+    value: string | boolean
+  ) => Promise<void>
+  getSyncStatus: () => Promise<CloudSyncStatus>
+  syncCloudReadings: () => Promise<CloudSyncStatus>
+  onSyncStatus: (callback: (status: CloudSyncStatus) => void) => () => void
+  getNodePondType: (nodeId: string) => Promise<string | null>
+  getNodeCustomProfile: (nodeId: string) => Promise<any>
+  setNodePondType: (nodeId: string, pondType: string) => Promise<NodeRow>
+  setNodeCustomProfile: (nodeId: string, profile: any) => Promise<NodeRow>
+  deleteNodeReadings: (nodeId: string) => Promise<number>
+  deleteNode: (nodeId: string) => Promise<number>
 }
 
 declare global {

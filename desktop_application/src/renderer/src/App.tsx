@@ -43,6 +43,7 @@ function App(): React.JSX.Element {
   const setKnownNodes = useReadingsStore((s) => s.setKnownNodes)
   const upsertKnownNode = useReadingsStore((s) => s.upsertKnownNode)
   const setSettings = useReadingsStore((s) => s.setSettings)
+  const setSyncStatus = useReadingsStore((s) => s.setSyncStatus)
   const [nodesLoaded, setNodesLoaded] = useState(false)
 
   useEffect(() => {
@@ -50,7 +51,10 @@ function App(): React.JSX.Element {
       setSettings(settings)
       document.documentElement.dataset.theme = settings.theme
     })
-  }, [setSettings])
+    window.api.getSyncStatus().then(setSyncStatus)
+    const unsubscribe = window.api.onSyncStatus((status) => setSyncStatus(status))
+    return () => unsubscribe()
+  }, [setSettings, setSyncStatus])
 
   useEffect(() => {
     if (!currentUser) return

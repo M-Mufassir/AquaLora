@@ -13,6 +13,8 @@ interface ScoreInput {
   temperature: number
   turbidity: number
   tds: number
+  ph?: number | null
+  pond_type?: string | null
 }
 
 const SCRIPT_PATH = join(__dirname, '../../decision-engine/fish_health_index.py')
@@ -72,7 +74,9 @@ export class DecisionEngine {
     const input: ScoreInput = {
       temperature: reading.temperature,
       turbidity: reading.turbidity,
-      tds: reading.tds
+      tds: reading.tds,
+      ph: reading.ph ?? null,
+      pond_type: reading.pond_type ?? null
     }
     return new Promise((resolve) => {
       this.pending.push({ resolve })

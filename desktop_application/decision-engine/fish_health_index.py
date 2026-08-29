@@ -15,22 +15,95 @@ protocol, alert storage, UI) does not need to change when that happens.
 import json
 import sys
 
-WEIGHTS = {'temperature': 0.5, 'turbidity': 0.3, 'tds': 0.2}
-
-# (ideal_min, ideal_max, acceptable_min, acceptable_max) — 100 inside ideal,
-# linearly down to 40 at the acceptable edge, down to 0 beyond it.
-IDEAL_RANGES = {
-    'temperature': (26.0, 30.0, 20.0, 34.0),
-    'turbidity': (0.0, 25.0, 0.0, 45.0),
-    'tds': (100.0, 300.0, 50.0, 400.0)
+# Common aquaculture profiles used as safe starting points for this academic
+# prototype. These are not final species-calibrated values, but they allow
+# different pond types to drift by species rather than forcing a single global
+# threshold for every slave node.
+# Values were chosen to reflect common Sri Lankan farm species and a practical
+# "starter threshold" range for monitoring dashboards before a site-specific
+# calibration is performed.
+POND_PROFILES = {
+    'tilapia': {
+        'temperature': (26.0, 30.0, 20.0, 34.0),
+        'turbidity': (0.0, 25.0, 0.0, 45.0),
+        'tds': (100.0, 300.0, 50.0, 400.0),
+        'ph': (6.5, 8.5, 5.5, 9.5),
+    },
+    'prawn': {
+        'temperature': (28.0, 32.0, 24.0, 35.0),
+        'turbidity': (0.0, 15.0, 0.0, 25.0),
+        'tds': (150.0, 250.0, 100.0, 350.0),
+        'ph': (7.0, 8.5, 6.5, 9.0),
+    },
+    'catfish': {
+        'temperature': (24.0, 30.0, 18.0, 34.0),
+        'turbidity': (0.0, 30.0, 0.0, 45.0),
+        'tds': (80.0, 250.0, 40.0, 350.0),
+        'ph': (6.5, 8.0, 5.5, 9.0),
+    },
+    'tuna': {
+        'temperature': (20.0, 25.0, 16.0, 30.0),
+        'turbidity': (0.0, 10.0, 0.0, 20.0),
+        'tds': (120.0, 250.0, 80.0, 300.0),
+        'ph': (7.5, 8.5, 6.8, 9.0),
+    },
+    'salmon': {
+        'temperature': (12.0, 18.0, 8.0, 22.0),
+        'turbidity': (0.0, 15.0, 0.0, 25.0),
+        'tds': (80.0, 200.0, 40.0, 250.0),
+        'ph': (6.5, 8.0, 6.0, 8.5),
+    },
 }
+
+
+def _normalize_profile(profile: dict) -> dict:
+    normalized = {}
+    for key in ('temperature', 'turbidity', 'tds', 'ph'):
+        bounds = profile.get(key) if isinstance(profile, dict) else None
+        if not isinstance(bounds, dict):
+            continue
+        try:
+            ideal_min = float(bounds.get('min', 0.0))
+            ideal_max = float(bounds.get('max', 0.0))
+        except (TypeError, ValueError):
+            continue
+        if ideal_max < ideal_min:
+            ideal_min, ideal_max = ideal_max, ideal_min
+        spread = max(1.0, (ideal_max - ideal_min) * 0.5)
+        normalized[key] = (ideal_min, ideal_max, ideal_min - spread, ideal_max + spread)
+    return normalized
+
+
+def _resolve_profile(reading: dict) -> dict:
+    pond_type = str(reading.get('pond_type', 'tilapia')).lower()
+    custom_profile = reading.get('custom_profile')
+    if pond_type == 'custom' and isinstance(custom_profile, dict):
+        normalized = _normalize_profile(custom_profile)
+        if normalized:
+            return normalized
+    if isinstance(custom_profile, dict) and pond_type != 'custom':
+        normalized = _normalize_profile(custom_profile)
+        if normalized and any(key in normalized for key in ('temperature', 'turbidity', 'tds', 'ph')):
+            return normalized
+    profile = POND_PROFILES.get(pond_type, POND_PROFILES['tilapia'])
+    return {
+        key: (ideal_min, ideal_max, acc_min, acc_max)
+        for key, (ideal_min, ideal_max, acc_min, acc_max) in {
+            k: (v[0], v[1], v[2], v[3]) for k, v in profile.items()
+        }.items()
+    }
+
+# Placeholder weighting for the 4th pH sensor until the decision-support team
+# finalizes the production coefficients. The total must remain 1.0.
+DEFAULT_WEIGHTS = {'temperature': 0.35, 'turbidity': 0.25, 'tds': 0.2, 'ph': 0.2}
 
 STATUS_THRESHOLDS = (70, 40)  # >=70 Normal, >=40 Warning, else Critical
 
 RECOMMENDATIONS = {
     'temperature': 'Temperature outside ideal range — check for equipment shading or heater/aerator faults.',
     'turbidity': 'High turbidity — check for recent rainfall, sediment disturbance, or overfeeding.',
-    'tds': 'TDS outside ideal range — check for possible contamination or evaporation concentrating salts.'
+    'tds': 'TDS outside ideal range — check for possible contamination or evaporation concentrating salts.',
+    'ph': 'pH outside the ideal range — check water chemistry, dosing, and aeration stability.'
 }
 
 
@@ -47,10 +120,14 @@ def score_parameter(value: float, ideal_min: float, ideal_max: float, acc_min: f
 
 
 def score_reading(reading: dict) -> dict:
+    profile = _resolve_profile(reading)
+    weights = DEFAULT_WEIGHTS
     subscores = {
-        key: score_parameter(float(reading[key]), *IDEAL_RANGES[key]) for key in WEIGHTS
+        key: score_parameter(float(reading.get(key, 0.0)), *profile[key]) for key in weights if key in profile
     }
-    fhi = sum(WEIGHTS[key] * subscores[key] for key in WEIGHTS)
+    if not subscores:
+        return {'score': 0.0, 'status': 'Critical', 'parameter': None, 'recommendation': None}
+    fhi = sum(weights[key] * subscores[key] for key in subscores)
 
     if fhi >= STATUS_THRESHOLDS[0]:
         status = 'Normal'

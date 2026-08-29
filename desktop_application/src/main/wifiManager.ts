@@ -27,6 +27,8 @@ export async function scanNetworks(): Promise<WifiNetwork[]> {
 
 export async function connectToNetwork(ssid: string, password: string): Promise<void> {
   ensureInit()
+  const current = await getCurrentConnection()
+  if (current.ssid && current.ssid === ssid) return
   await wifi.connect({ ssid, password })
 }
 
