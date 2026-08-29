@@ -217,7 +217,7 @@ export function resolveEffectiveProfile(
 // as normal once a score exists at all.
 export function deriveParamStatus(
   score: Pick<Score, 'status' | 'parameter'> | null,
-  param: 'temperature' | 'turbidity' | 'tds'
+  param: 'temperature' | 'turbidity' | 'tds' | 'ph'
 ): GaugeStatus {
   if (!score) return 'unknown'
   if (score.status === 'Normal') return 'normal'

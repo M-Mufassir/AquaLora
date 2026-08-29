@@ -113,6 +113,7 @@ function HistoryPanel({ nodeId }: HistoryPanelProps): React.JSX.Element {
             color="var(--cat-turbidity)"
           />
           <ChartRow title="TDS (ppm)" data={readings} dataKey="tds" color="var(--cat-tds)" />
+          <ChartRow title="pH" data={readings} dataKey="ph" color="#8b5cf6" />
         </>
       )}
     </div>

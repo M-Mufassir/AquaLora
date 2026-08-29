@@ -34,6 +34,23 @@ AquaLoRa has four subsystems built by four team members. This repository is the 
 
 **The core architectural decision this repo implements:** unlike comparable systems (which treat a cloud platform like Firebase/ThingSpeak as the only copy of data), this dashboard's local SQLite database is the **permanent system of record**. Cloud sync, if ever added, is optional and secondary — the system works fully offline by design.
 
+### WiFi connectivity model — AP mode and external WiFi mode
+
+The project now supports two operating modes for the ESP32 Master Node:
+
+1. **AP mode (legacy / pairing-first mode)**
+   - The ESP32 opens its own WiFi access point, e.g. `AquaLoRa-MasterNode`.
+   - The dashboard joins the AP, then connects to `ws://192.168.4.1:8081`.
+   - Best for direct pairing and validation on a bench or a small demo.
+
+2. **External WiFi / station mode (production deployment mode)**
+   - The ESP32 joins a local router or office WiFi network using configured credentials.
+   - The dashboard no longer needs to be physically joined to the ESP32 AP.
+   - The dashboard connects directly to the ESP32's LAN IP, e.g. `ws://192.168.1.50:8081`.
+   - This is the model needed for real-world deployment and remote monitoring.
+
+This means the dashboard pairing flow now supports both patterns: either (a) connect to the node AP during setup, or (b) connect directly to the ESP32 IP on the external network after it has joined the router.
+
 ---
 
 ## 2. This Repository's Architecture
@@ -127,9 +144,9 @@ Unlike a typical Master Node setup where the dashboard machine and the Master No
 5. **Auto-detect nodes** — the Master Node sends an encrypted `{"type":"node_list","nodes":[{"node_id":"..."}]}` the instant the WebSocket connects; the wizard shows "N nodes detected" immediately, before any node's first periodic `Reading` even arrives.
 6. The resolved URL (and the derived encryption key) is saved to `settings`, so restarts reconnect automatically without repeating the wizard.
 
-**Windows permission caveat**: joining a *new* WiFi network via `netsh` can require elevated rights depending on machine policy — the wizard never hard-blocks on this. If the automatic join fails, it offers "Open Windows WiFi Settings" plus "I've connected manually — Continue," so the user can finish the OS-level join themselves and the wizard proceeds regardless.
+**Windows permission caveat**: joining a _new_ WiFi network via `netsh` can require elevated rights depending on machine policy — the wizard never hard-blocks on this. If the automatic join fails, it offers "Open Windows WiFi Settings" plus "I've connected manually — Continue," so the user can finish the OS-level join themselves and the wizard proceeds regardless.
 
-**Encryption**: every message over the WebSocket link is AES-256-GCM encrypted (`src/main/secureChannel.ts`) — confidentiality plus tamper detection (a forged/altered message fails the auth tag and is dropped, not trusted). The key is derived (SHA-256) from the same WiFi password typed into step 3 above, so there's no separate secret to provision — the pairing password *is* the encryption secret. This applies to both directions: uplink readings/discovery and downlink commands (`set_interval`). Leaving the password field blank falls back to plain JSON, which only makes sense for the dev mock (below) — a real device should always be paired with its password.
+**Encryption**: every message over the WebSocket link is AES-256-GCM encrypted (`src/main/secureChannel.ts`) — confidentiality plus tamper detection (a forged/altered message fails the auth tag and is dropped, not trusted). The key is derived (SHA-256) from the same WiFi password typed into step 3 above, so there's no separate secret to provision — the pairing password _is_ the encryption secret. This applies to both directions: uplink readings/discovery and downlink commands (`set_interval`). Leaving the password field blank falls back to plain JSON, which only makes sense for the dev mock (below) — a real device should always be paired with its password.
 
 **Testing without real hardware**: `mock_master_node.js` sends the same `node_list` message, and the wizard has a dev-only "Use local mock" shortcut that skips straight to linking against it. **Testing with real hardware but no LoRa Slave Nodes yet**: flash an ESP32 with `../firmware_design/master_node/AquaLoRa_MasterNode_Dummy/` — it creates the AP and streams dummy readings using this exact protocol, so the full pairing flow can be validated on real WiFi hardware before the LoRa side exists. See `../firmware_design/master_node/README.md`.
 
@@ -178,16 +195,16 @@ Sampling-interval control in the UI sends `set_interval` over the same WebSocket
 - [x] Login — bcrypt-hashed passwords, `admin`/`operator` roles, default admin auto-created on first run
 - [x] Node offline detection — 30s sweep, 5 min staleness threshold
 - [x] Connection error states — visible "Disconnected — retrying…" banner, DB writes wrapped so a failure can't crash the app
-- [x] *(added beyond the original plan)* Light/dark theme, multi-page nav (Home/Logs/Settings), multi-node support, user management UI, logout
+- [x] _(added beyond the original plan)_ Light/dark theme, multi-page nav (Home/Logs/Settings), multi-node support, user management UI, logout
 
 ### ✅ Phase 9 — Real MCU WiFi Pairing
 
 Originally scoped as just swapping `MASTER_NODE_URL` for a LAN IP, on the assumption the Master Node would already share a network with the dashboard machine. The actual Master Node broadcasts its own WiFi AP instead, so this phase became the Connect Device wizard described in § "Real MCU pairing" above: OS-level WiFi scan/join (`wifiManager.ts`, `node-wifi`), dynamic `masterNodeClient` target instead of a hardcoded constant, and node auto-detection via a `node_list` discovery message. Validated against `../firmware_design/master_node/AquaLoRa_MasterNode_Dummy/` (a real ESP32 broadcasting its own AP + streaming dummy readings over the same protocol) since the LoRa/Slave Node side isn't built yet.
-**Done when:** the wizard pairs with a real ESP32's AP and dummy sensor data flows into the dashboard live. *(Swapping the dummy firmware for the real Slave-Node-relaying Master Node firmware, once Members 1/2 finish it, needs no dashboard changes — same protocol/port.)*
+**Done when:** the wizard pairs with a real ESP32's AP and dummy sensor data flows into the dashboard live. _(Swapping the dummy firmware for the real Slave-Node-relaying Master Node firmware, once Members 1/2 finish it, needs no dashboard changes — same protocol/port.)_
 
 ### ⏳ Phase 10 — Integration Testing & Validation (blocked on hardware)
 
-Staged integration order from the proposal: Slave+Master LoRa link (Members 1/2) → Master+Dashboard (the WiFi pairing + WebSocket link itself is now validated via the dummy firmware, above — what's left here is confirming it holds with the *real* Master Node firmware once it exists) → Dashboard+Decision Engine (confirm scoring holds up on real sensor noise, not just clean mock/dummy data).
+Staged integration order from the proposal: Slave+Master LoRa link (Members 1/2) → Master+Dashboard (the WiFi pairing + WebSocket link itself is now validated via the dummy firmware, above — what's left here is confirming it holds with the _real_ Master Node firmware once it exists) → Dashboard+Decision Engine (confirm scoring holds up on real sensor noise, not just clean mock/dummy data).
 
 ---
 
@@ -232,7 +249,7 @@ To pair with real hardware instead of the mock server, see § "Real MCU pairing"
 
 ## 5. Data Transmission & Node Detection — Technical Reference
 
-This section is the detailed reference for exactly how bytes move between the Master Node and this dashboard, and exactly how a physical sensor node goes from "just started transmitting" to "visible in the UI." § 2's "Real MCU pairing" above covers the *user-facing* wizard flow; this covers the *wire protocol and detection logic* underneath it.
+This section is the detailed reference for exactly how bytes move between the Master Node and this dashboard, and exactly how a physical sensor node goes from "just started transmitting" to "visible in the UI." § 2's "Real MCU pairing" above covers the _user-facing_ wizard flow; this covers the _wire protocol and detection logic_ underneath it.
 
 ### 5.1 Transport
 
@@ -247,11 +264,11 @@ There is exactly **one physical connection**, multiplexing every logical channel
 
 ### 5.2 Message catalog
 
-| Message | Direction | `type` field | Sent by | Sent when | Handled by |
-| --- | --- | --- | --- | --- | --- |
-| `Reading` | Uplink | *(none — the default)* | Master Node | Once per sampling interval, per known sensor node (10s default in the mock/dummy firmware) | `masterNodeClient.onReading` → `db.upsertNodeFromReading` + `db.insertReading` → `decisionEngine.scoreReading` |
-| `NodeListMessage` | Uplink (discovery) | `"node_list"` | Master Node | Once, immediately on every new WebSocket connection | `masterNodeClient.onNodeList` → `db.upsertNodeStub` per node |
-| `SetIntervalCommand` | Downlink | `"set_interval"` | Dashboard | Whenever the user changes the sampling interval in the UI | Master Node applies it to its own send timer (LoRa firmware would relay it onward to the Slave Node) |
+| Message              | Direction          | `type` field           | Sent by     | Sent when                                                                                  | Handled by                                                                                                     |
+| -------------------- | ------------------ | ---------------------- | ----------- | ------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| `Reading`            | Uplink             | _(none — the default)_ | Master Node | Once per sampling interval, per known sensor node (10s default in the mock/dummy firmware) | `masterNodeClient.onReading` → `db.upsertNodeFromReading` + `db.insertReading` → `decisionEngine.scoreReading` |
+| `NodeListMessage`    | Uplink (discovery) | `"node_list"`          | Master Node | Once, immediately on every new WebSocket connection                                        | `masterNodeClient.onNodeList` → `db.upsertNodeStub` per node                                                   |
+| `SetIntervalCommand` | Downlink           | `"set_interval"`       | Dashboard   | Whenever the user changes the sampling interval in the UI                                  | Master Node applies it to its own send timer (LoRa firmware would relay it onward to the Slave Node)           |
 
 `Reading`'s shape is the fixed data contract agreed with the LoRa/firmware team (§ 2, "Data contract") — `node_id`, `timestamp`, `temperature`, `turbidity`, `tds`, `battery_pct`, `rssi`. The other two are dashboard-internal protocol messages layered on top; they never travel over the LoRa hop, only the WiFi/WebSocket one.
 
@@ -276,11 +293,11 @@ Dashboard                                          Master Node (ESP32 AP)
 
 **Envelope**: `{ "iv": "<base64>", "tag": "<base64>", "data": "<base64>" }` — a fresh random 12-byte IV per message (`crypto.randomBytes` / `esp_random()`), the 16-byte GCM authentication tag, and the ciphertext. No additional authenticated data (AAD) is used.
 
-**Key derivation**: `SHA-256(WiFi AP password)` → a 32-byte AES-256 key. The *same password* the user types into the Connect Device wizard to join the Master Node's AP (`AP_PASSWORD` in the firmware sketch) is the pairing secret *and* the encryption secret — there's nothing separate to generate, distribute, or keep in sync between the dashboard and firmware. Changing the AP password on either side changes the key on both automatically, since both sides derive it the same way at connect time.
+**Key derivation**: `SHA-256(WiFi AP password)` → a 32-byte AES-256 key. The _same password_ the user types into the Connect Device wizard to join the Master Node's AP (`AP_PASSWORD` in the firmware sketch) is the pairing secret _and_ the encryption secret — there's nothing separate to generate, distribute, or keep in sync between the dashboard and firmware. Changing the AP password on either side changes the key on both automatically, since both sides derive it the same way at connect time.
 
 **Persistence**: `master:connect` derives the key once and stores it — hex-encoded, alongside the paired URL — in the `settings` table (`master_node_key_hex`), so a restart reconnects encrypted without asking the user to retype the password. (This means the key sits in the local SQLite file in the clear, same trust boundary as everything else the dashboard stores — acceptable for a local single-machine app, not something to widen the exposure of.)
 
-**Failure handling**: `decryptMessage()` (dashboard) / `decryptEnvelope()` (firmware) return `null`/`false` on *any* failure — malformed envelope, wrong key, or a failed GCM auth-tag check (meaning the message was corrupted or forged) — and the caller just drops the message and logs why, rather than crashing the connection or trusting unverified data. This is what makes the auth tag meaningful: a tampered message doesn't silently decrypt to garbage that gets processed, it fails closed.
+**Failure handling**: `decryptMessage()` (dashboard) / `decryptEnvelope()` (firmware) return `null`/`false` on _any_ failure — malformed envelope, wrong key, or a failed GCM auth-tag check (meaning the message was corrupted or forged) — and the caller just drops the message and logs why, rather than crashing the connection or trusting unverified data. This is what makes the auth tag meaningful: a tampered message doesn't silently decrypt to garbage that gets processed, it fails closed.
 
 **When it's skipped**: pairing with no password (the dev-only "Use local mock" shortcut, or an intentionally open MCU AP) falls back to plain JSON on both ends — `masterNodeClient.connect(url)` with no key, matching `mock_master_node.js`, which never speaks the encrypted envelope format at all.
 
@@ -290,15 +307,15 @@ Dashboard                                          Master Node (ESP32 AP)
 
 A sensor node's `nodes` row (§ 2, "Database schema") is created automatically — there is deliberately no manual "Add Node" UI (removed; a `node_id` is only ever something firmware assigns, never something a person types in). Two independent mechanisms feed it, and either one alone is sufficient:
 
-1. **Active discovery — the `node_list` message.** The Master Node enumerates every sensor node it currently knows about and sends it the instant a WebSocket connection opens (`WStype_CONNECTED` in the firmware). `masterNodeClient.onNodeList` calls `db.upsertNodeStub(node_id)` for each one — an `INSERT ... ON CONFLICT DO NOTHING`, so it only ever *creates* a row if missing and never overwrites an existing one's `name`/`location`. That matters because this message re-fires on **every** reconnect (including the 3s auto-retry), so it must not clobber a name the user set later. This is what makes the Connect Device wizard able to show "N nodes detected" within a couple of seconds, well before any node's first periodic `Reading` arrives.
+1. **Active discovery — the `node_list` message.** The Master Node enumerates every sensor node it currently knows about and sends it the instant a WebSocket connection opens (`WStype_CONNECTED` in the firmware). `masterNodeClient.onNodeList` calls `db.upsertNodeStub(node_id)` for each one — an `INSERT ... ON CONFLICT DO NOTHING`, so it only ever _creates_ a row if missing and never overwrites an existing one's `name`/`location`. That matters because this message re-fires on **every** reconnect (including the 3s auto-retry), so it must not clobber a name the user set later. This is what makes the Connect Device wizard able to show "N nodes detected" within a couple of seconds, well before any node's first periodic `Reading` arrives.
 
-2. **Passive discovery — the first `Reading`.** `db.upsertNodeFromReading` fires on *every* incoming reading and does a full upsert: creates the row if it's the first time that `node_id` has been seen, and on every call (new or existing) stamps `last_seen`/`battery_pct`/`lora_rssi` and sets `status = 'online'`. This is the fallback path — a node that, for whatever reason, wasn't part of the Master Node's `node_list` snapshot (e.g. it joined the LoRa mesh after that list was built) still gets detected the moment its first reading successfully relays through.
+2. **Passive discovery — the first `Reading`.** `db.upsertNodeFromReading` fires on _every_ incoming reading and does a full upsert: creates the row if it's the first time that `node_id` has been seen, and on every call (new or existing) stamps `last_seen`/`battery_pct`/`lora_rssi` and sets `status = 'online'`. This is the fallback path — a node that, for whatever reason, wasn't part of the Master Node's `node_list` snapshot (e.g. it joined the LoRa mesh after that list was built) still gets detected the moment its first reading successfully relays through.
 
 Both paths converge on the same `nodes` table and the same `node:updated` IPC push to the renderer, so the UI (Zustand's `knownNodes`) doesn't need to know or care which path created a given row.
 
-**Node loss (the inverse)** works the same way, by absence rather than presence: a 30s sweep (`markStaleNodesOffline`, `OFFLINE_THRESHOLD_MS = 5 * 60_000`) flips any node whose `last_seen` has gone stale from `'online'` to `'offline'`, pushed live via `node:status`. There's no separate heartbeat/keepalive protocol — "online" and "offline" are both just derived from *when a `Reading` last arrived for that `node_id`*.
+**Node loss (the inverse)** works the same way, by absence rather than presence: a 30s sweep (`markStaleNodesOffline`, `OFFLINE_THRESHOLD_MS = 5 * 60_000`) flips any node whose `last_seen` has gone stale from `'online'` to `'offline'`, pushed live via `node:status`. There's no separate heartbeat/keepalive protocol — "online" and "offline" are both just derived from _when a `Reading` last arrived for that `node_id`_.
 
-**Master Node detection** (a separate concern from sensor-*node* detection above — this is about finding the gateway device itself, before any of the above can even start) is a third technique: `wifiManager.scanNetworks()` lists nearby WiFi SSIDs via the OS (`node-wifi`, which drives `netsh` on Windows / `nmcli` on Linux / `airport` on macOS). The wizard applies a soft heuristic — any SSID matching `/aqualora/i` gets an `MCU` badge — to help the user spot the right network in a crowded list; it's a hint, not a filter, so any SSID can still be selected and joined.
+**Master Node detection** (a separate concern from sensor-_node_ detection above — this is about finding the gateway device itself, before any of the above can even start) is a third technique: `wifiManager.scanNetworks()` lists nearby WiFi SSIDs via the OS (`node-wifi`, which drives `netsh` on Windows / `nmcli` on Linux / `airport` on macOS). The wizard applies a soft heuristic — any SSID matching `/aqualora/i` gets an `MCU` badge — to help the user spot the right network in a crowded list; it's a hint, not a filter, so any SSID can still be selected and joined.
 
 ---
 
@@ -308,7 +325,7 @@ The dashboard side, including the real-MCU WiFi pairing flow, is functionally co
 
 **Blocked on Members 1/2's hardware:**
 
-- [ ] **Phase 10** — staged integration testing: LoRa link first, then confirm the real Master Node firmware works against the dashboard the same way the dummy firmware does, then Dashboard+Decision Engine on *real* sensor noise (mock/dummy data is clean by comparison — expect to find edge cases: dropped packets, out-of-order readings, sensor glitches neither ever produces).
+- [ ] **Phase 10** — staged integration testing: LoRa link first, then confirm the real Master Node firmware works against the dashboard the same way the dummy firmware does, then Dashboard+Decision Engine on _real_ sensor noise (mock/dummy data is clean by comparison — expect to find edge cases: dropped packets, out-of-order readings, sensor glitches neither ever produces).
 
 **Needs a team decision, not hardware:**
 

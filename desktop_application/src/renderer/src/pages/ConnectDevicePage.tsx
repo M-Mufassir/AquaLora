@@ -23,6 +23,7 @@ function ConnectDevicePage(): React.JSX.Element {
   const [networks, setNetworks] = useState<WifiNetwork[]>([])
   const [scanError, setScanError] = useState<string | null>(null)
   const [selectedSsid, setSelectedSsid] = useState<string | null>(null)
+  const [manualUrl, setManualUrl] = useState('ws://192.168.1.50:8081')
   const [password, setPassword] = useState('')
   const [joinError, setJoinError] = useState<string | null>(null)
   const [joining, setJoining] = useState(false)
@@ -134,6 +135,23 @@ function ConnectDevicePage(): React.JSX.Element {
               ))}
             </ul>
           )}
+
+          <div className="settings-section" style={{ marginTop: '1rem' }}>
+            <h3>Or connect directly to an ESP32 on external WiFi</h3>
+            <label htmlFor="manual-ws-url">WebSocket URL</label>
+            <input
+              id="manual-ws-url"
+              value={manualUrl}
+              onChange={(e) => setManualUrl(e.target.value)}
+              placeholder="ws://192.168.1.50:8081"
+            />
+            <p className="modal-hint">
+              Use this when the ESP32 joins your router instead of starting its own WiFi AP.
+            </p>
+            <button className="apply-btn" onClick={() => startLinking(manualUrl, password || undefined)}>
+              Connect to external WiFi host
+            </button>
+          </div>
 
           {import.meta.env.DEV && (
             <button className="apply-btn" onClick={() => startLinking(MOCK_MASTER_NODE_URL)}>

@@ -36,6 +36,12 @@ function SettingsPage(): React.JSX.Element {
   const syncStatus = useReadingsStore((s) => s.syncStatus)
   const [activeTab, setActiveTab] = useState<SettingsTab>('default')
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
+  const [nodeForm, setNodeForm] = useState({
+    id: '',
+    name: '',
+    location: '',
+    pondType: 'tilapia' as keyof typeof POND_LABELS
+  })
   const [savedWifiSsid, setSavedWifiSsid] = useState(settings.savedWifiSsid ?? '')
   const [savedWifiPassword, setSavedWifiPassword] = useState(settings.savedWifiPassword ?? '')
   const [cloudSyncUrl, setCloudSyncUrl] = useState(settings.cloudSyncUrl ?? '')
@@ -53,11 +59,43 @@ function SettingsPage(): React.JSX.Element {
     profile: { ...DEFAULT_POND_PROFILES.tilapia }
   })
 
+  const selectedNode = knownNodes.find((node) => node.id === selectedNodeId) ?? null
+
+  const totalPonds = knownNodes.length
+  const onlinePonds = knownNodes.filter((node) => node.status === 'online').length
+  const customProfilePonds = knownNodes.filter((node) => node.pond_type === 'custom').length
+  const farmOverviewStats = [
+    { label: 'Total ponds', value: String(totalPonds) },
+    { label: 'Online', value: String(onlinePonds) },
+    { label: 'Custom profiles', value: String(customProfilePonds) },
+    { label: 'Selected', value: selectedNode ? selectedNode.name || selectedNode.id : 'None' }
+  ]
+
   useEffect(() => {
-    if (!knownNodes.length) return
-    const firstNode = knownNodes[0]
-    setSelectedNodeId(firstNode.id)
-  }, [knownNodes])
+    if (!knownNodes.length) {
+      setSelectedNodeId(null)
+      setNodeForm({ id: '', name: '', location: '', pondType: 'tilapia' })
+      return
+    }
+
+    if (!selectedNodeId || !knownNodes.some((node) => node.id === selectedNodeId)) {
+      const firstNode = knownNodes[0]
+      setSelectedNodeId(firstNode.id)
+    }
+  }, [knownNodes, selectedNodeId])
+
+  useEffect(() => {
+    if (selectedNode) {
+      setNodeForm({
+        id: selectedNode.id,
+        name: selectedNode.name ?? '',
+        location: selectedNode.location ?? '',
+        pondType: (selectedNode.pond_type ?? 'tilapia') as keyof typeof POND_LABELS
+      })
+    } else if (!selectedNodeId) {
+      setNodeForm({ id: '', name: '', location: '', pondType: 'tilapia' })
+    }
+  }, [selectedNode, selectedNodeId])
 
   useEffect(() => {
     const nextNameDrafts: Record<string, string> = {}
@@ -133,6 +171,34 @@ function SettingsPage(): React.JSX.Element {
     await window.api.changeUserPassword('Admin', adminPassword)
     setAdminPassword('')
     setAdminFeedback('Admin password updated successfully.')
+  }
+
+  function resetNodeForm(): void {
+    setNodeForm({ id: '', name: '', location: '', pondType: 'tilapia' })
+    setSelectedNodeId(knownNodes[0]?.id ?? null)
+  }
+
+  async function handleSaveNodeForm(): Promise<void> {
+    const trimmedId = nodeForm.id.trim()
+    if (!trimmedId) {
+      setPondFeedback('Node ID is required.')
+      return
+    }
+
+    const updated = await window.api.upsertNode(
+      trimmedId,
+      nodeForm.name.trim(),
+      nodeForm.location.trim()
+    )
+    await window.api.setNodePondType(trimmedId, nodeForm.pondType)
+    useReadingsStore.getState().upsertKnownNode(updated)
+    useReadingsStore.getState().upsertKnownNode({
+      ...updated,
+      pond_type: nodeForm.pondType,
+      custom_profile: null
+    })
+    setSelectedNodeId(trimmedId)
+    setPondFeedback(`Saved node ${trimmedId}.`)
   }
 
   async function handleDeleteReadings(nodeId: string): Promise<void> {
@@ -393,18 +459,116 @@ function SettingsPage(): React.JSX.Element {
       {activeTab === 'ponds' && (
         <section className="settings-section">
           <h2>Pond management</h2>
+
+          <div className="farm-overview">
+            {farmOverviewStats.map((stat) => (
+              <div className="farm-stat" key={stat.label}>
+                <span>{stat.label}</span>
+                <strong>{stat.value}</strong>
+              </div>
+            ))}
+          </div>
+
+          <div className="pond-card premium-editor-card">
+            <div className="pond-card-header">
+              <div>
+                <strong>{selectedNode ? 'Edit selected slave node' : 'Add new slave node'}</strong>
+                <div className="pond-meta">{selectedNode ? `Currently editing: ${selectedNode.id}` : 'Create a device record manually'}</div>
+              </div>
+              <div className="status-pills">
+                <span className={`status-pill ${selectedNode?.status === 'online' ? 'online' : 'offline'}`}>
+                  {selectedNode?.status === 'online' ? 'Online' : 'Offline'}
+                </span>
+              </div>
+            </div>
+
+            <div className="pond-card-grid">
+              <div>
+                <label>Node ID</label>
+                <input
+                  value={nodeForm.id}
+                  onChange={(e) => setNodeForm((current) => ({ ...current, id: e.target.value }))}
+                  placeholder="slave-04"
+                />
+              </div>
+              <div>
+                <label>Friendly name</label>
+                <input
+                  value={nodeForm.name}
+                  onChange={(e) => setNodeForm((current) => ({ ...current, name: e.target.value }))}
+                  placeholder="Prawn Pond East"
+                />
+              </div>
+              <div>
+                <label>Location</label>
+                <input
+                  value={nodeForm.location}
+                  onChange={(e) => setNodeForm((current) => ({ ...current, location: e.target.value }))}
+                  placeholder="Farm Block A"
+                />
+              </div>
+              <div>
+                <label>Pond type</label>
+                <select
+                  value={nodeForm.pondType}
+                  onChange={(e) =>
+                    setNodeForm((current) => ({
+                      ...current,
+                      pondType: e.target.value as keyof typeof POND_LABELS
+                    }))
+                  }
+                >
+                  {POND_TYPES.map((type) => (
+                    <option key={type} value={type}>{POND_LABELS[type]}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="pond-actions">
+              <button className="apply-btn" onClick={handleSaveNodeForm}>
+                {selectedNode ? 'Update node' : 'Add node'}
+              </button>
+              <button className="apply-btn" onClick={resetNodeForm}>Reset form</button>
+            </div>
+          </div>
+
           <div className="pond-manage-list">
             {knownNodes.length === 0 ? (
               <p className="status">No ponds available yet.</p>
             ) : (
               knownNodes.map((node) => (
-                <div key={node.id} className="pond-card">
+                <div
+                  key={node.id}
+                  className={`pond-card${selectedNodeId === node.id ? ' selected' : ''}`}
+                  onClick={() => setSelectedNodeId(node.id)}
+                >
                   <div className="pond-card-header">
                     <div>
                       <strong>{node.name || node.id}</strong>
                       <div className="pond-meta">ID: {node.id}</div>
                     </div>
-                    <span className="pond-type-badge">{POND_LABELS[node.pond_type ?? 'tilapia']}</span>
+                    <div className="status-pills">
+                      <span className={`status-pill ${node.status === 'online' ? 'online' : 'offline'}`}>
+                        {node.status === 'online' ? 'Online' : 'Offline'}
+                      </span>
+                      <span className="pond-type-badge">{POND_LABELS[node.pond_type ?? 'tilapia']}</span>
+                    </div>
+                  </div>
+
+                  <div className="node-health-strip">
+                    <div className="mini-metric">
+                      <span>Battery</span>
+                      <strong>{node.battery_pct ?? '--'}%</strong>
+                    </div>
+                    <div className="mini-metric">
+                      <span>Signal</span>
+                      <strong>{node.lora_rssi ?? '--'} dBm</strong>
+                    </div>
+                    <div className="mini-metric">
+                      <span>Profile</span>
+                      <strong>{node.pond_type === 'custom' ? 'Custom' : POND_LABELS[node.pond_type ?? 'tilapia']}</strong>
+                    </div>
                   </div>
 
                   <div className="pond-card-grid">
@@ -473,7 +637,7 @@ function SettingsPage(): React.JSX.Element {
                             ))}
                           </select>
                         </div>
-                        <div className="profile-grid">
+                        <div className="profile-grid compact-grid">
                           {Object.entries((customProfiles[node.id] ?? DEFAULT_POND_PROFILES.tilapia) as PondThresholdProfile).map(([key, range]) => (
                             <div key={key} className="profile-field">
                               <label>{key.toUpperCase()}</label>

@@ -69,6 +69,17 @@ function NodeSummaryCard({ node, state }: NodeSummaryCardProps): React.JSX.Eleme
               status={deriveParamStatus(state.latestScore, 'tds')}
               accent="var(--cat-tds)"
             />
+            <Gauge
+              label="pH"
+              value={state.latest.ph ?? 7}
+              unit="pH"
+              min={4}
+              max={10}
+              decimals={1}
+              size="sm"
+              status={deriveParamStatus(state.latestScore, 'ph')}
+              accent="#8b5cf6"
+            />
           </div>
           <div className="node-summary-meta">
             <span>Battery {state.status.batteryPct ?? '--'}%</span>

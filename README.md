@@ -48,6 +48,15 @@ Two physically separated nodes, communicating over long-range radio, feeding a l
 
 **The core design decision:** every comparable system reviewed in our literature research treats a third-party cloud platform (Firebase, ThingSpeak, Blynk) as the _only_ copy of the data. AquaLoRa inverts this — the dashboard's local SQLite database is the permanent record; cloud sync, if ever added, is optional. Combined with a WiFi-less, solar-powered Slave Node and a lightweight rule-based decision engine (chosen over ML/fuzzy logic to run on low-cost hardware without training data), this is the specific combination that doesn't exist elsewhere in the reviewed literature — local or international.
 
+### WiFi communication model update
+
+The Master Node no longer depends only on its own access point. The production design now supports both:
+
+- **AP mode**: the ESP32 starts `AquaLoRa-MasterNode` and the dashboard connects to `ws://192.168.4.1:8081`.
+- **External WiFi / station mode**: the ESP32 joins an office or home router, and the dashboard connects directly to the node's LAN IP, for example `ws://192.168.1.50:8081`.
+
+The dashboard connection wizard and firmware therefore support both deployment styles, while the local-first SQLite + outbox cloud backup model remains unchanged.
+
 ## 3. Repository Structure
 
 ```
@@ -116,7 +125,7 @@ All four subsystems must agree on this shape. If any one changes it unilaterally
 { "type": "set_interval", "minutes": 30 }
 ```
 
-**Master ↔ Dashboard transport & security**: this hop (WiFi/WebSocket only — not the LoRa hop) is AES-256-GCM encrypted, keyed by deriving SHA-256 of the same WiFi password used to pair with the Master Node's own access point — no separate secret to provision. Both JSON shapes above travel as an encrypted `{"iv","tag","data"}` envelope on real hardware; a message that fails decryption/authentication (wrong key, or tampered in transit) is dropped rather than trusted. A third message type, `{"type":"node_list","nodes":[{"node_id":"..."}]}`, is sent once by the Master Node the instant the dashboard connects, so the dashboard can auto-detect however many sensor nodes exist without any manual setup. Full protocol/encryption/detection reference: `desktop_application/README.md` § "Data Transmission & Node Detection."
+**Master ↔ Dashboard transport & security**: this hop (WiFi/WebSocket only — not the LoRa hop) is AES-256-GCM encrypted. In AP mode the shared key is derived from the Master Node AP password; in external WiFi/station mode the same pattern still applies when the dashboard connects using the configured network password or a dedicated shared secret. Both JSON shapes above travel as an encrypted `{"iv","tag","data"}` envelope on real hardware; a message that fails decryption/authentication (wrong key, or tampered in transit) is dropped rather than trusted. A third message type, `{"type":"node_list","nodes":[{"node_id":"..."}]}`, is sent once by the Master Node the instant the dashboard connects, so the dashboard can auto-detect however many sensor nodes exist without any manual setup. Full protocol/encryption/detection reference: `desktop_application/README.md` § "Data Transmission & Node Detection."
 
 **Dashboard → Decision Engine (local, not over the network):**
 

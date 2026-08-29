@@ -1166,13 +1166,13 @@ code {
 .settings-tabs {
   display: flex;
   gap: 10px;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
   padding: 6px;
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid var(--color-border);
+  background: rgba(11, 28, 37, 0.72);
+  border: 1px solid rgba(126, 168, 195, 0.26);
   width: fit-content;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 10px 30px rgba(4, 16, 20, 0.12);
 }
 
 .tab-btn {
@@ -1189,11 +1189,11 @@ code {
 
 .tab-btn:hover {
   color: #ffffff;
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .tab-btn.active {
-  background: linear-gradient(135deg, rgba(74, 168, 255, 0.24), rgba(56, 211, 159, 0.16));
+  background: linear-gradient(135deg, rgba(74, 168, 255, 0.22), rgba(56, 211, 159, 0.18));
   color: #ffffff;
   border-color: rgba(74, 168, 255, 0.26);
   box-shadow: inset 0 0 0 1px rgba(74, 168, 255, 0.12);
@@ -1202,12 +1202,12 @@ code {
 .settings-section {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
   padding: 18px 20px;
-  border-radius: 16px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0.012));
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.014));
   border: 1px solid var(--color-border);
-  box-shadow: 0 10px 24px rgba(3, 14, 20, 0.12);
+  box-shadow: 0 14px 30px rgba(3, 14, 20, 0.12);
 }
 
 .settings-section h2 {
@@ -1250,21 +1250,59 @@ code {
   color: var(--status-good);
 }
 
+.farm-overview {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+}
+
+.farm-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(134, 174, 202, 0.22);
+  background: linear-gradient(180deg, rgba(80, 176, 255, 0.08), rgba(20, 92, 139, 0.06));
+}
+
+.farm-stat span {
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ev-c-text-3);
+}
+
+.farm-stat strong {
+  font-size: 22px;
+  color: #f4fbff;
+}
+
 .pond-manage-list {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
 }
 
 .pond-card {
   border: 1px solid var(--color-border);
-  border-radius: 16px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0.01));
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0.012));
   padding: 16px 18px;
   display: flex;
   flex-direction: column;
   gap: 14px;
-  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.08);
+  transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.pond-card.selected {
+  border-color: rgba(79, 167, 255, 0.52);
+  box-shadow: 0 16px 28px rgba(35, 114, 176, 0.16);
+}
+
+.premium-editor-card {
+  background: linear-gradient(180deg, rgba(10, 40, 54, 0.72), rgba(12, 24, 31, 0.66));
 }
 
 .pond-card-header {
@@ -1280,14 +1318,73 @@ code {
   margin-top: 4px;
 }
 
+.status-pills {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.status-pill.online {
+  background: rgba(52, 211, 153, 0.12);
+  border: 1px solid rgba(52, 211, 153, 0.38);
+  color: #8fe7c4;
+}
+
+.status-pill.offline {
+  background: rgba(148, 163, 184, 0.12);
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  color: #dbe8f0;
+}
+
 .pond-type-badge {
   padding: 5px 10px;
   border-radius: 999px;
-  background-color: var(--ev-c-gray-3);
+  background: rgba(98, 160, 221, 0.13);
+  border: 1px solid rgba(126, 168, 195, 0.24);
   color: var(--ev-c-text-1);
   font-size: 11px;
   font-weight: 700;
   text-transform: capitalize;
+}
+
+.node-health-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 10px;
+}
+
+.mini-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--color-border);
+}
+
+.mini-metric span {
+  font-size: 10px;
+  color: var(--ev-c-text-3);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.mini-metric strong {
+  font-size: 13px;
+  color: #f7fbfe;
 }
 
 .pond-card-grid {
@@ -1367,6 +1464,10 @@ code {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: 10px;
+}
+
+.compact-grid {
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
 }
 
 .profile-field {

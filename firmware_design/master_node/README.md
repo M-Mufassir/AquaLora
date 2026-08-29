@@ -7,6 +7,7 @@ Production firmware for the office gateway Master Node unit (**SLIIT IE3044 Desi
 ## 1. System Overview
 
 The Master Node acts as a dual-bridge telemetry gateway:
+
 1. **LoRa Receiver**: Receives 433 MHz RF packets over SPI from Slave Nodes (`"slave-01,25.40,320,1.50"`).
 2. **OLED Display Driver**: Renders live telemetry metrics and system status directly to a 1.3" SH1106 / 0.96" SSD1306 OLED screen (I2C).
 3. **Wi-Fi Access Point & WebSocket Gateway**: Runs its own Wi-Fi Access Point (`AquaLoRa-MasterNode`) and AES-256-GCM encrypted WebSocket server (`ws://192.168.4.1:8081`) to push live data to the desktop dashboard app.
@@ -32,16 +33,16 @@ master_node/
 
 ## 3. Hardware Pinout & Specs
 
-| Component | Function | ESP32 GPIO | Description |
-| :--- | :--- | :--- | :--- |
-| **Ra-02 LoRa** | SPI SCK | `GPIO 18` | Hardware SPI Clock |
-| **Ra-02 LoRa** | SPI MISO | `GPIO 19` | Hardware SPI Master In Slave Out |
-| **Ra-02 LoRa** | SPI MOSI | `GPIO 23` | Hardware SPI Master Out Slave In |
-| **Ra-02 LoRa** | SPI NSS | `GPIO 5` | SPI Chip Select Line |
-| **Ra-02 LoRa** | Reset | `GPIO 27` | LoRa Reset Line |
-| **Ra-02 LoRa** | DIO0 | `GPIO 13` | LoRa Interrupt Line |
-| **OLED Display** | I2C SDA | `GPIO 21` | Hardware I2C Data |
-| **OLED Display** | I2C SCL | `GPIO 22` | Hardware I2C Clock |
+| Component        | Function | ESP32 GPIO | Description                      |
+| :--------------- | :------- | :--------- | :------------------------------- |
+| **Ra-02 LoRa**   | SPI SCK  | `GPIO 18`  | Hardware SPI Clock               |
+| **Ra-02 LoRa**   | SPI MISO | `GPIO 19`  | Hardware SPI Master In Slave Out |
+| **Ra-02 LoRa**   | SPI MOSI | `GPIO 23`  | Hardware SPI Master Out Slave In |
+| **Ra-02 LoRa**   | SPI NSS  | `GPIO 5`   | SPI Chip Select Line             |
+| **Ra-02 LoRa**   | Reset    | `GPIO 27`  | LoRa Reset Line                  |
+| **Ra-02 LoRa**   | DIO0     | `GPIO 13`  | LoRa Interrupt Line              |
+| **OLED Display** | I2C SDA  | `GPIO 21`  | Hardware I2C Data                |
+| **OLED Display** | I2C SCL  | `GPIO 22`  | Hardware I2C Clock               |
 
 ---
 
@@ -90,7 +91,23 @@ master_node/
 
 ## 6. Pairing with Dashboard App
 
+### Option A — AP mode (original pairing method)
+
 1. Power the ESP32 Master Node.
 2. On your PC, connect to Wi-Fi SSID **`AquaLoRa-MasterNode`** (password: **`aqualora123`**).
 3. Open Desktop Application dashboard -> **Settings -> Connect Device**.
 4. Enter password `aqualora123` and connect. The dashboard links to `ws://192.168.4.1:8081` and streams live telemetry!
+
+### Option B — External WiFi / router mode (new deployment path)
+
+1. Configure the ESP32 to join an external WiFi router by setting:
+   - `WIFI_USE_EXTERNAL_NETWORK 1`
+   - `EXTERNAL_WIFI_SSID = "YourRouterSSID"`
+   - `EXTERNAL_WIFI_PASSWORD = "YourRouterPassword"`
+2. Flash the firmware and power the ESP32.
+3. The ESP32 joins the router and assigns itself a LAN IP, for example `192.168.1.50`.
+4. In the dashboard, use the manual connection field and connect to:
+   `ws://192.168.1.50:8081`
+5. The dashboard now receives telemetry over the router instead of the ESP32's own access point.
+
+This mode is the correct choice for real deployments where the Master Node must send and receive data over normal office/home WiFi.

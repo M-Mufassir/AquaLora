@@ -109,6 +109,16 @@ function LogsPage(): React.JSX.Element {
                     status={deriveParamStatus(state.latestScore, 'tds')}
                     accent="var(--cat-tds)"
                   />
+                  <Gauge
+                    label="pH"
+                    value={state.latest.ph ?? 7}
+                    unit="pH"
+                    min={4}
+                    max={10}
+                    decimals={1}
+                    status={deriveParamStatus(state.latestScore, 'ph')}
+                    accent="#8b5cf6"
+                  />
                 </div>
               ) : (
                 <p className="status">Waiting for a reading from this node...</p>
