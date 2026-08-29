@@ -1172,7 +1172,9 @@ code {
   background: rgba(11, 28, 37, 0.72);
   border: 1px solid rgba(126, 168, 195, 0.26);
   width: fit-content;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 10px 30px rgba(4, 16, 20, 0.12);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 10px 30px rgba(4, 16, 20, 0.12);
 }
 
 .tab-btn {
@@ -1293,7 +1295,10 @@ code {
   flex-direction: column;
   gap: 14px;
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.08);
-  transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+  transition:
+    border-color 0.2s ease,
+    transform 0.2s ease,
+    box-shadow 0.2s ease;
 }
 
 .pond-card.selected {
