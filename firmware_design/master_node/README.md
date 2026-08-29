@@ -1,48 +1,96 @@
-# Master Node Firmware
+# Master Node Firmware — AquaLoRa Marine Telemetry System
 
-This folder is Member 2's real Master Node firmware (ESP32 + LoRa RX/TX + OLED + WiFi, per the root README's architecture). Until that's built, `AquaLoRa_MasterNode_Dummy/` is a stand-in: it creates the same kind of WiFi access point and speaks the exact same WebSocket protocol as `../../desktop_application/mock_master_node.js` — same JSON shapes, same port — so the dashboard's real-MCU WiFi pairing flow (Connect Device wizard) can be tested end-to-end on actual hardware before the LoRa/Slave Node side exists, and so nothing on the dashboard side needs a special case for "real hardware vs. mock." Swapping this out for the real firmware later needs no dashboard changes, as long as it keeps to the same protocol/port.
+Production firmware for the office gateway Master Node unit (**SLIIT IE3044 Design Project**).
 
-**Every message is AES-256-GCM encrypted** — confidentiality (nobody else on the WiFi can read readings) plus authenticity (a forged/tampered message fails the tag check and is silently dropped rather than trusted). The key is derived from `AP_PASSWORD` below via SHA-256 — the same password typed into the dashboard's wizard to join this AP — so there's no separate secret to provision or keep in sync. See `desktop_application/src/main/secureChannel.ts` for the matching implementation; the `{"iv","tag","data"}` (all base64) envelope format must stay identical on both ends. A full TLS/WSS transport (real certs) was considered and rejected for now — `WebSocketsServer` has no well-supported secure-server mode on ESP32, and cert management is disproportionate overhead for a closed, single-client AP link; this gives the practically-relevant properties (confidentiality + tamper detection) with code that fits comfortably on the chip.
+---
 
-## What it does
+## 1. System Overview
 
-- Creates a WiFi AP: SSID `AquaLoRa-MasterNode`, password `aqualora123` (change both in the sketch if you want — just make sure they match what you type into the dashboard's wizard; changing the password also changes the encryption key, nothing else to update).
-- Runs a WebSocket server on port `8081` at the AP's gateway address, `192.168.4.1` (the standard default for `WiFi.softAP()` — no configuration needed).
-- The moment the dashboard connects, sends an encrypted `{"type":"node_list","nodes":[...]}` message listing 3 dummy sensor nodes (`slave-01`, `slave-02`, `slave-03`) — this is what makes the wizard show "3 nodes detected" immediately.
-- Every 10 seconds (configurable), broadcasts an encrypted dummy reading per node matching the dashboard's fixed data contract:
+The Master Node acts as a dual-bridge telemetry gateway:
+1. **LoRa Receiver**: Receives 433 MHz RF packets over SPI from Slave Nodes (`"slave-01,25.40,320,1.50"`).
+2. **OLED Display Driver**: Renders live telemetry metrics and system status directly to a 1.3" SH1106 / 0.96" SSD1306 OLED screen (I2C).
+3. **Wi-Fi Access Point & WebSocket Gateway**: Runs its own Wi-Fi Access Point (`AquaLoRa-MasterNode`) and AES-256-GCM encrypted WebSocket server (`ws://192.168.4.1:8081`) to push live data to the desktop dashboard app.
+
+---
+
+## 2. Directory Structure
+
+```text
+master_node/
+├── AquaLoRa_MasterNode/         Production Master Node Firmware (LoRa SPI + OLED + Wi-Fi AP + AES-256-GCM)
+│   ├── AquaLoRa_MasterNode.ino  Main sketch (Setup AP, OLED, LoRa & Dual Processing Loop)
+│   ├── config.h                 Hardware pinouts, Wi-Fi credentials & RF frequency settings
+│   ├── display.h                OLED display driver (SH1106 page mode & SSD1306 support)
+│   ├── lora_receiver.h          SX1278 SPI driver & comma-separated payload parser
+│   └── secure_ws.h              AES-256-GCM mbedtls cipher & WebSocketsServer gateway
+│
+├── AquaLoRa_MasterNode_Dummy/   Dev Mock Stand-in (Simulated telemetry without LoRa HW)
+└── README.md                    This documentation file
+```
+
+---
+
+## 3. Hardware Pinout & Specs
+
+| Component | Function | ESP32 GPIO | Description |
+| :--- | :--- | :--- | :--- |
+| **Ra-02 LoRa** | SPI SCK | `GPIO 18` | Hardware SPI Clock |
+| **Ra-02 LoRa** | SPI MISO | `GPIO 19` | Hardware SPI Master In Slave Out |
+| **Ra-02 LoRa** | SPI MOSI | `GPIO 23` | Hardware SPI Master Out Slave In |
+| **Ra-02 LoRa** | SPI NSS | `GPIO 5` | SPI Chip Select Line |
+| **Ra-02 LoRa** | Reset | `GPIO 27` | LoRa Reset Line |
+| **Ra-02 LoRa** | DIO0 | `GPIO 13` | LoRa Interrupt Line |
+| **OLED Display** | I2C SDA | `GPIO 21` | Hardware I2C Data |
+| **OLED Display** | I2C SCL | `GPIO 22` | Hardware I2C Clock |
+
+---
+
+## 4. Encryption & Communication Protocol
+
+- **Wi-Fi Access Point**: SSID `AquaLoRa-MasterNode`, Password `aqualora123`.
+- **WebSocket Server**: Port `8081` at gateway IP `192.168.4.1`.
+- **AES-256-GCM Encryption**: Every message is encrypted using `mbedtls` with a 256-bit key derived via `SHA-256("aqualora123")`.
+- **JSON Data Contract**:
   ```json
-  { "node_id": "slave-01", "timestamp": "...", "temperature": 28.5, "turbidity": 35.2, "tds": 220, "battery_pct": 87, "rssi": -62 }
+  {
+    "node_id": "slave-01",
+    "timestamp": "2026-08-22T12:00:00Z",
+    "temperature": 28.5,
+    "turbidity": 35.2,
+    "tds": 220,
+    "battery_pct": 95,
+    "rssi": -62
+  }
   ```
-  Each node's value ranges are tuned the same way as the mock server, so all three Fish Health Index status tiers (Good/Warning/Critical) still demo correctly.
-- Listens for `{"type":"set_interval","minutes":N}` encrypted downlink commands from the dashboard (sent when you change the sampling interval in the UI) and actually applies it. A message that fails decryption/authentication (wrong password, or tampered in transit) is logged and dropped.
-- Timestamps are well-formed ISO 8601 but **not wall-clock accurate** — the AP-only ESP32 has no internet access for NTP, so the sketch seeds its clock once at boot with a fixed date and lets it free-run. Fine for testing the connection/data pipeline; not meant to represent real time.
+- **Base64 JSON Envelope**:
+  ```json
+  {
+    "iv": "base64_iv_12_bytes",
+    "tag": "base64_tag_16_bytes",
+    "data": "base64_ciphertext"
+  }
+  ```
 
-## Setup
+---
+
+## 5. Setup & Compilation
 
 1. **Arduino IDE**: File → Preferences → Additional Boards Manager URLs, add:
    `https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json`
-   Then Tools → Board → Boards Manager → install "esp32" (by Espressif Systems).
-2. **Libraries** (Tools → Manage Libraries):
-   - `WebSockets` by Markus Sattler (this is the Links2004/arduinoWebSockets package)
+2. **Install Required Libraries**:
+   - `WebSockets` by Markus Sattler (Links2004)
    - `ArduinoJson` by Benoit Blanchon
-   - AES-GCM/SHA-256/base64 (`mbedtls/*.h`) need no separate install — they ship inside the `esp32` board package itself.
-3. Open `AquaLoRa_MasterNode_Dummy/AquaLoRa_MasterNode_Dummy.ino` (this folder), select your ESP32 board + port, and upload.
-4. Open the Serial Monitor at 115200 baud to confirm it prints the AP SSID and IP address on boot.
+   - `LoRa` by Sandeep Mistry
+   - `Adafruit GFX Library` & `Adafruit SSD1306`
+3. Open `AquaLoRa_MasterNode/AquaLoRa_MasterNode.ino`.
+4. Select board **ESP32 Dev Module**, select COM port, and click **Upload**.
+5. Open Serial Monitor at **115200 baud** to view boot logs.
 
-Verified to compile clean against esp32 core 3.3.7 (`arduino-cli compile --fqbn esp32:esp32:esp32`) — 73% flash, 15% RAM on a typical ESP32 Dev Module.
+---
 
-## Testing against the dashboard
+## 6. Pairing with Dashboard App
 
-1. Power the ESP32.
-2. In the dashboard, go to Settings → Device Connection → Connect Device (or it'll prompt automatically on first run).
-3. Scan, pick `AquaLoRa-MasterNode` from the list (tagged "MCU"), enter `aqualora123`, connect.
-4. The wizard should link to `ws://192.168.4.1:8081` and report "3 nodes detected" within a couple of seconds.
-5. Continue to the dashboard — readings for `slave-01`/`02`/`03` should start appearing live within ~10s.
-
-If the automatic WiFi join fails (Windows can require elevated permissions to add a new network profile via `netsh`), join `AquaLoRa-MasterNode` manually from Windows WiFi settings and click "I've connected manually — Continue" in the wizard; everything past that point works the same. The wizard step where you type the AP password (`aqualora123`) is also what derives the encryption key — leave that field blank and it falls back to plain/unencrypted (only meant for the dev mock, not a real device).
-
-## Adjusting the dummy data
-
-- Node count/ranges: edit the `NODES[]` array.
-- Send interval: edit `samplingIntervalMs` (or just use the dashboard's sampling-interval control once connected — it sends a live `set_interval` command).
-- SSID/password/port: edit the `AP_SSID` / `AP_PASSWORD` / `WS_PORT` constants at the top of the sketch.
+1. Power the ESP32 Master Node.
+2. On your PC, connect to Wi-Fi SSID **`AquaLoRa-MasterNode`** (password: **`aqualora123`**).
+3. Open Desktop Application dashboard -> **Settings -> Connect Device**.
+4. Enter password `aqualora123` and connect. The dashboard links to `ws://192.168.4.1:8081` and streams live telemetry!
