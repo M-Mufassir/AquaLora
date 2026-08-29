@@ -189,7 +189,38 @@ All in `research_notes/`:
 - `AquaLoRa_Reference_DeepDive.pdf` — full annotated reference list with source summaries
 - `AquaLoRa_Presentation.pptx` — proposal defense slide deck
 
-## 11. Getting Started
+## 11. Deployment & Packaging
+
+The AquaLoRa system is designed as a local-first architecture:
+
+- The desktop app stores its main data in SQLite locally.
+- It can also sync queued readings to the Railway PostgreSQL backend as a secondary cloud backup.
+- The live backend URL used by the desktop app is:
+
+```text
+https://aqualora.up.railway.app
+```
+
+For deployment setup, see the backend README in `Backend/README.md` and the app configuration section in `desktop_application/README.md`.
+
+### Build the desktop installer (.exe)
+
+From the `desktop_application` folder, run:
+
+```bash
+npm install
+npm run build:win
+```
+
+This builds the app and creates the Windows installer at:
+
+```text
+desktop_application/dist/aqualora-dashboard-0.1.0-setup.exe
+```
+
+The generated `.exe` file is the installable desktop application for Windows users. If you want a portable debug build or want to inspect unpacked files, the `dist/win-unpacked/` folder is also created automatically.
+
+## 12. Getting Started
 
 Each subsystem is developed and run independently — see the README inside each folder for setup instructions specific to that part:
 
@@ -200,6 +231,9 @@ cd AquaLoRa
 # Desktop application — dashboard (Member 3) + decision engine (Member 4)
 # Can start immediately, no hardware needed (builds against a mock Master Node)
 cd desktop_application && cat README.md
+
+# Cloud backend — PostgreSQL + FastAPI sync service
+cd Backend && cat README.md
 
 # Firmware (Members 1 & 2) — needs ESP32 boards + PlatformIO/Arduino IDE
 cd firmware_design/master_node && cat README.md

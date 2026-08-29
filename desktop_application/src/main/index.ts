@@ -50,10 +50,47 @@ import type { Score } from '../shared/types'
 const OFFLINE_CHECK_INTERVAL_MS = 30_000
 const OFFLINE_THRESHOLD_MS = 5 * 60_000
 const CLOUD_SYNC_INTERVAL_MS = 2 * 60_000
+const CLOUD_ADMIN_USERNAME = 'Admin'
+const CLOUD_ADMIN_PASSWORD = 'Admin123'
 
 let mainWindow: BrowserWindow
 const masterNodeClient = new MasterNodeClient()
 const decisionEngine = new DecisionEngine()
+
+async function getCloudAuthToken(): Promise<string | null> {
+  const baseUrl = getSettingOptional('cloud_sync_url')?.trim()
+  if (!baseUrl) {
+    return null
+  }
+
+  const loginUrl = new URL('/auth/login', baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`).toString()
+
+  try {
+    const response = await fetch(loginUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: CLOUD_ADMIN_USERNAME,
+        password: CLOUD_ADMIN_PASSWORD
+      })
+    })
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+    }
+
+    const payload = (await response.json()) as { access_token?: string }
+    if (!payload.access_token) {
+      throw new Error('Cloud login did not return an access token')
+    }
+
+    return payload.access_token
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown cloud login error'
+    console.error('[main] cloud login failed:', message)
+    return null
+  }
+}
 
 async function syncQueuedReadings(): Promise<void> {
   const baseUrl = getSettingOptional('cloud_sync_url')?.trim()
@@ -72,9 +109,17 @@ async function syncQueuedReadings(): Promise<void> {
   const readings = pendingEntries.map((entry) => JSON.parse(entry.payload_json))
 
   try {
+    const accessToken = await getCloudAuthToken()
+    if (!accessToken) {
+      throw new Error('Unable to authenticate with the cloud backend. Check the deployed backend URL and admin credentials.')
+    }
+
     const response = await fetch(syncUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`
+      },
       body: JSON.stringify({ readings })
     })
 

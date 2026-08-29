@@ -238,8 +238,35 @@ Order doesn't matter. On a fresh install (or any install that's never been paire
 ```bash
 npm run typecheck   # main + renderer, no emit
 npm run build        # electron-vite production build (out/main, out/preload, out/renderer)
-npm run build:win    # the above, then electron-builder — produces a distributable installer
+npm run build:win    # builds the app and creates the Windows .exe installer
 ```
+
+### Build the Windows desktop installer (.exe)
+
+From this folder, run:
+
+```bash
+npm install
+npm run build:win
+```
+
+This creates a Windows installer in:
+
+```text
+dist/aqualora-dashboard-0.1.0-setup.exe
+```
+
+The app is also unpacked into a folder under `dist/win-unpacked/` for troubleshooting or portable testing. The generated installer is the standard Windows `.exe` file users can run to install AquaLoRa Desktop.
+
+> If you want to distribute the app to end users, install a valid code-signing certificate before publishing the installer. For a student/demo environment, the local `build:win` command is enough to generate the installer file.
+
+To connect the desktop app to the live cloud backup backend, open the app settings and set the Cloud Sync URL to the Railway URL, for example:
+
+```text
+https://aqualora.up.railway.app
+```
+
+The desktop app then syncs local SQLite readings to the backend using the same outbox pattern used in the project design.
 
 The SQLite file lives at `%APPDATA%/aqualora-dashboard/aqualora.db` (Windows) — delete it to reset the app to a fresh first-run state.
 
