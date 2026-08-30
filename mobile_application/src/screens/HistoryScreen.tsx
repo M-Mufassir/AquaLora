@@ -36,22 +36,31 @@ const METRICS: MetricConfig[] = [
   { key: 'ph', label: 'pH Level', unit: 'pH', icon: '⚖️', safeMin: 6.5, safeMax: 8.5, color: '#10B981' },
 ];
 
+import { saveCache, getCache, CACHE_KEYS } from '../services/cacheService';
+
 export const HistoryScreen = () => {
   const [selectedMetric, setSelectedMetric] = useState<MetricType>('temperature');
   const [selectedPeriod, setSelectedPeriod] = useState<PeriodType>('24h');
   const [readings, setReadings] = useState<Reading[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [isOfflineMode, setIsOfflineMode] = useState(false);
 
   const fetchHistory = useCallback(async (isRefresh = false) => {
     if (!isRefresh) setLoading(true);
     try {
-      // In production API, `/readings/latest` or `/readings` returns recent points
       const data = await apiService.get<Reading[]>('/readings/latest');
       const readingsArray = Array.isArray(data) ? data : [data];
       setReadings(readingsArray);
+      await saveCache(CACHE_KEYS.HISTORY, readingsArray);
+      setIsOfflineMode(false);
     } catch (err) {
-      console.warn('Failed to load telemetry history:', err);
+      console.warn('Failed to load live telemetry history, attempting cache fallback:', err);
+      const cached = await getCache<Reading[]>(CACHE_KEYS.HISTORY);
+      if (cached && cached.data.length > 0) {
+        setReadings(cached.data);
+        setIsOfflineMode(true);
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);

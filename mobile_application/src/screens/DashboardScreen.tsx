@@ -16,6 +16,8 @@ import { Reading } from '../shared/types';
 import { colors, borderRadius, spacing, typography, shadows } from '../theme';
 import { Gauge, StatusBar, SkeletonLoader, Button } from '../components';
 
+import { saveCache, getCache, CACHE_KEYS } from '../services/cacheService';
+
 export const DashboardScreen = () => {
   const { loading: authLoading } = useContext(AuthContext);
   const [readings, setReadings] = useState<Reading[]>([]);
@@ -23,6 +25,7 @@ export const DashboardScreen = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isOfflineMode, setIsOfflineMode] = useState(false);
 
   const fetchReadings = useCallback(async (isRefresh = false) => {
     if (!isRefresh) setLoading(true);
@@ -30,19 +33,30 @@ export const DashboardScreen = () => {
       const data = await apiService.get<Reading[]>('/readings/latest');
       const readingsArray = Array.isArray(data) ? data : [data];
       setReadings(readingsArray);
+      await saveCache(CACHE_KEYS.READINGS, readingsArray);
 
       if (readingsArray.length > 0) {
         setSelectedNodeId(prev => (prev && readingsArray.some(r => r.node_id === prev) ? prev : readingsArray[0].node_id));
       }
       setError(null);
+      setIsOfflineMode(false);
     } catch (err) {
       const apiErr = err as APIError;
-      setError(apiErr.message || 'Failed to sync latest telemetry.');
+      // Attempt cache retrieval
+      const cached = await getCache<Reading[]>(CACHE_KEYS.READINGS);
+      if (cached && cached.data.length > 0) {
+        setReadings(cached.data);
+        if (!selectedNodeId) setSelectedNodeId(cached.data[0].node_id);
+        setError(`Offline Mode — Showing cached data from ${new Date(cached.timestamp).toLocaleTimeString()}`);
+        setIsOfflineMode(true);
+      } else {
+        setError(apiErr.message || 'Failed to sync latest telemetry.');
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [selectedNodeId]);
 
   useEffect(() => {
     if (!authLoading) {
@@ -100,7 +114,7 @@ export const DashboardScreen = () => {
 
       {/* Top Connection Status Bar */}
       <StatusBar
-        isConnected={!error}
+        isConnected={!isOfflineMode}
         lastSynced={currentReading ? new Date(currentReading.timestamp).toLocaleTimeString() : 'N/A'}
         nodeId={currentReading?.node_id}
       />

@@ -5,35 +5,67 @@ let initialized = false
 
 function ensureInit(): void {
   if (initialized) return
-  wifi.init({ iface: null })
-  initialized = true
+  try {
+    wifi.init({ iface: null })
+    initialized = true
+  } catch (err) {
+    console.warn('[wifiManager] Failed to initialize node-wifi:', err)
+  }
 }
 
-// Scans and dedupes by SSID (the same AP shows up once per channel/BSSID
-// otherwise), keeping the strongest signal reading of each.
+// Timeout helper to ensure Wi-Fi operations never block Electron or main process
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallbackValue: T): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((resolve) => setTimeout(() => resolve(fallbackValue), timeoutMs))
+  ])
+}
+
+// Scans and dedupes by SSID with non-blocking 3s timeout
 export async function scanNetworks(): Promise<WifiNetwork[]> {
   ensureInit()
-  const results = await wifi.scan()
-  const bySsid = new Map<string, WifiNetwork>()
-  for (const r of results) {
-    if (!r.ssid) continue
-    const existing = bySsid.get(r.ssid)
-    if (!existing || r.signal_level > existing.signalLevel) {
-      bySsid.set(r.ssid, { ssid: r.ssid, signalLevel: r.signal_level, security: r.security })
-    }
+  try {
+    const scanPromise = wifi.scan().then((results) => {
+      const bySsid = new Map<string, WifiNetwork>()
+      for (const r of results) {
+        if (!r.ssid) continue
+        const existing = bySsid.get(r.ssid)
+        if (!existing || r.signal_level > existing.signalLevel) {
+          bySsid.set(r.ssid, { ssid: r.ssid, signalLevel: r.signal_level, security: r.security })
+        }
+      }
+      return [...bySsid.values()].sort((a, b) => b.signalLevel - a.signalLevel)
+    })
+
+    return await withTimeout(scanPromise, 3000, [])
+  } catch (err) {
+    console.warn('[wifiManager] Network scan failed or timed out:', err)
+    return []
   }
-  return [...bySsid.values()].sort((a, b) => b.signalLevel - a.signalLevel)
 }
 
 export async function connectToNetwork(ssid: string, password: string): Promise<void> {
   ensureInit()
-  const current = await getCurrentConnection()
-  if (current.ssid && current.ssid === ssid) return
-  await wifi.connect({ ssid, password })
+  try {
+    const current = await getCurrentConnection()
+    if (current.ssid && current.ssid === ssid) return
+
+    const connectPromise = wifi.connect({ ssid, password })
+    await withTimeout(connectPromise, 5000, undefined)
+  } catch (err) {
+    console.warn('[wifiManager] Wi-Fi connection attempt failed:', err)
+  }
 }
 
 export async function getCurrentConnection(): Promise<WifiConnectionState> {
   ensureInit()
-  const conns = await wifi.getCurrentConnections()
-  return { ssid: conns[0]?.ssid ?? null }
+  try {
+    const statusPromise = wifi.getCurrentConnections().then((conns) => ({
+      ssid: conns[0]?.ssid ?? null
+    }))
+    return await withTimeout(statusPromise, 2000, { ssid: null })
+  } catch (err) {
+    console.warn('[wifiManager] Failed to fetch current connection:', err)
+    return { ssid: null }
+  }
 }

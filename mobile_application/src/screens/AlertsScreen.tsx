@@ -19,6 +19,8 @@ import { AlertBadge, SkeletonLoader, Button } from '../components';
 
 type SeverityFilter = 'all' | 'critical' | 'warning' | 'normal';
 
+import { saveCache, getCache, CACHE_KEYS } from '../services/cacheService';
+
 export const AlertsScreen = () => {
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [loading, setLoading] = useState(true);
@@ -26,6 +28,7 @@ export const AlertsScreen = () => {
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<SeverityFilter>('all');
   const [selectedAlert, setSelectedAlert] = useState<Alert | null>(null);
+  const [isOfflineMode, setIsOfflineMode] = useState(false);
 
   const fetchAlerts = useCallback(async (isRefresh = false) => {
     if (!isRefresh) setLoading(true);
@@ -33,10 +36,19 @@ export const AlertsScreen = () => {
       const data = await apiService.get<Alert[]>('/alerts/latest');
       const alertsArray = Array.isArray(data) ? data : [data];
       setAlerts(alertsArray);
+      await saveCache(CACHE_KEYS.ALERTS, alertsArray);
       setError(null);
+      setIsOfflineMode(false);
     } catch (err) {
       const apiErr = err as APIError;
-      setError(apiErr.message || 'Failed to fetch alerts.');
+      const cached = await getCache<Alert[]>(CACHE_KEYS.ALERTS);
+      if (cached && cached.data.length > 0) {
+        setAlerts(cached.data);
+        setError(`Offline Mode — Showing cached alerts from ${new Date(cached.timestamp).toLocaleTimeString()}`);
+        setIsOfflineMode(true);
+      } else {
+        setError(apiErr.message || 'Failed to fetch alerts.');
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);
