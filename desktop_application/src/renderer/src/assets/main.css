@@ -521,10 +521,155 @@ code {
 }
 
 .nav-connection-warning {
-  color: var(--status-critical);
+  color: var(--status-warning);
   font-size: 12px;
   font-weight: 600;
-  margin-right: 8px;
+  margin-right: 12px;
+  background-color: color-mix(in srgb, var(--status-warning) 15%, transparent);
+  padding: 4px 10px;
+  border-radius: 999px;
+}
+
+.nav-connection-good {
+  color: var(--status-good);
+  font-size: 12px;
+  font-weight: 600;
+  margin-right: 12px;
+  background-color: color-mix(in srgb, var(--status-good) 15%, transparent);
+  padding: 4px 10px;
+  border-radius: 999px;
+}
+
+.nav-sync-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: 12px;
+}
+
+.nav-sync-badge {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 999px;
+}
+
+.nav-sync-badge.synced {
+  color: var(--status-good);
+  background-color: color-mix(in srgb, var(--status-good) 15%, transparent);
+}
+
+.nav-sync-badge.pending {
+  color: var(--status-warning);
+  background-color: color-mix(in srgb, var(--status-warning) 15%, transparent);
+}
+
+.nav-sync-badge.error {
+  color: var(--status-critical);
+  background-color: color-mix(in srgb, var(--status-critical) 15%, transparent);
+}
+
+.nav-sync-btn {
+  cursor: pointer;
+  border: none;
+  border-radius: 8px;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #ffffff;
+  background: linear-gradient(135deg, rgba(74, 168, 255, 0.4), rgba(56, 211, 159, 0.3));
+  transition: all 0.2s ease;
+}
+
+.nav-sync-btn:hover {
+  background: linear-gradient(135deg, rgba(74, 168, 255, 0.6), rgba(56, 211, 159, 0.5));
+}
+
+.cloud-migration-card {
+  margin-top: 24px;
+  padding: 20px 24px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(13, 42, 52, 0.8), rgba(18, 52, 65, 0.6));
+  border: 1px solid var(--color-border);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+}
+
+.cloud-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.cloud-title-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.cloud-icon {
+  font-size: 24px;
+}
+
+.cloud-title-group h3 {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ev-c-text-1);
+  margin: 0;
+}
+
+.cloud-subtitle {
+  font-size: 12px;
+  color: var(--ev-c-text-3);
+  margin: 2px 0 0;
+}
+
+.cloud-sync-action-btn {
+  cursor: pointer;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #ffffff;
+  background: linear-gradient(135deg, #1e90ff, #0066cc);
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 8px rgba(30, 144, 255, 0.3);
+}
+
+.cloud-sync-action-btn:hover {
+  background: linear-gradient(135deg, #0066cc, #004c99);
+  transform: translateY(-1px);
+}
+
+.cloud-stats-row {
+  display: flex;
+  gap: 24px;
+  border-top: 1px solid var(--color-border);
+  padding-top: 14px;
+}
+
+.cloud-stat-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cloud-stat-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ev-c-text-3);
+}
+
+.cloud-stat-val {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ev-c-text-1);
+}
+
+.cloud-stat-val.highlight {
+  color: var(--status-warning);
 }
 
 .theme-toggle-btn {

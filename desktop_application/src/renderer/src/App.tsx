@@ -94,6 +94,8 @@ function App(): React.JSX.Element {
     upsertKnownNode
   ])
 
+  const syncStatus = useReadingsStore((s) => s.syncStatus)
+
   if (!currentUser) {
     return <LoginScreen onLogin={(username, role) => setCurrentUser({ username, role })} />
   }
@@ -117,9 +119,45 @@ function App(): React.JSX.Element {
             Settings
           </NavLink>
           <div className="nav-spacer" />
-          {linkStatus === 'reconnecting' && (
-            <span className="nav-connection-warning">Reconnecting…</span>
+
+          {/* Master Node Link Status */}
+          {linkStatus === 'reconnecting' ? (
+            <span className="nav-connection-warning">🟡 Master Node Reconnecting…</span>
+          ) : (
+            <span className="nav-connection-good">🟢 Master Node Connected</span>
           )}
+
+          {/* Cloud Sync & Migration Badge */}
+          {syncStatus.enabled && (
+            <div className="nav-sync-group">
+              <span
+                className={`nav-sync-badge ${
+                  syncStatus.lastError
+                    ? 'error'
+                    : syncStatus.pendingCount > 0
+                    ? 'pending'
+                    : 'synced'
+                }`}
+              >
+                {syncStatus.lastError
+                  ? '🔴 Sync Error'
+                  : syncStatus.pendingCount > 0
+                  ? `🟡 ${syncStatus.pendingCount} Pending Sync`
+                  : '🟢 Cloud Synced'}
+              </span>
+              <button
+                className="nav-sync-btn"
+                onClick={async () => {
+                  const status = await window.api.syncCloudReadings()
+                  useReadingsStore.getState().setSyncStatus(status)
+                }}
+                title="Sync queued telemetry and alerts to cloud backend"
+              >
+                🔄 Sync Now
+              </button>
+            </div>
+          )}
+
           <span className="nav-user">
             {currentUser.username} <span className="nav-user-role">({currentUser.role})</span>
           </span>

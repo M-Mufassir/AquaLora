@@ -60,9 +60,9 @@ function HomePage(): React.JSX.Element {
         </div>
       </div>
 
-      <h2 className="home-section-title">Nodes</h2>
+      <h2 className="home-section-title">Nodes (4-Sensor Telemetry: Temp, Turbidity, TDS, pH)</h2>
       {knownNodes.length === 0 ? (
-        <p className="status">No nodes yet — add one from the Logs page.</p>
+        <p className="status">No nodes yet — add one from the Logs page or Connect Device wizard.</p>
       ) : (
         <div className="node-summary-grid">
           {knownNodes.map((node) => (
@@ -70,6 +70,52 @@ function HomePage(): React.JSX.Element {
           ))}
         </div>
       )}
+
+      {/* Cloud Migration & Outbox Sync Status Banner */}
+      <div className="cloud-migration-card">
+        <div className="cloud-card-header">
+          <div className="cloud-title-group">
+            <span className="cloud-icon">☁️</span>
+            <div>
+              <h3>Cloud Migration & Mobile Outbox Sync</h3>
+              <p className="cloud-subtitle">
+                3-Layer Architecture: Master Node → Desktop SQLite (Primary) → FastAPI Cloud Backend → Mobile App
+              </p>
+            </div>
+          </div>
+          <button
+            className="cloud-sync-action-btn"
+            onClick={async () => {
+              const status = await window.api.syncCloudReadings()
+              useReadingsStore.getState().setSyncStatus(status)
+            }}
+          >
+            🔄 Sync Cloud Now
+          </button>
+        </div>
+        <div className="cloud-stats-row">
+          <div className="cloud-stat-item">
+            <span className="cloud-stat-label">Cloud Backend URL</span>
+            <span className="cloud-stat-val">
+              {useReadingsStore.getState().syncStatus.url || 'Not configured (Local Offline Mode)'}
+            </span>
+          </div>
+          <div className="cloud-stat-item">
+            <span className="cloud-stat-label">Outbox Queue Pending</span>
+            <span className="cloud-stat-val highlight">
+              {useReadingsStore.getState().syncStatus.pendingCount} items
+            </span>
+          </div>
+          <div className="cloud-stat-item">
+            <span className="cloud-stat-label">Last Successful Backup</span>
+            <span className="cloud-stat-val">
+              {useReadingsStore.getState().syncStatus.lastSyncedAt
+                ? formatRelativeTime(useReadingsStore.getState().syncStatus.lastSyncedAt!)
+                : 'Never'}
+            </span>
+          </div>
+        </div>
+      </div>
 
       <h2 className="home-section-title">Recent Alerts</h2>
       {recentAlerts.length === 0 ? (
