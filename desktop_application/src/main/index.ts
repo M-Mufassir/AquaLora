@@ -37,9 +37,12 @@ import {
   deleteNodeReadings,
   deleteNode,
   getPendingOutboxEntries,
+  getPendingAlertOutboxEntries,
   getCloudSyncStatus,
   markOutboxSynced,
-  markOutboxFailed
+  markOutboxFailed,
+  markAlertOutboxSynced,
+  markAlertOutboxFailed
 } from './db'
 import { MasterNodeClient } from './masterNodeClient'
 import { DecisionEngine } from './decisionEngine'
@@ -99,40 +102,70 @@ async function syncQueuedReadings(): Promise<void> {
   }
 
   const pendingEntries = getPendingOutboxEntries(100)
-  if (pendingEntries.length === 0) {
+  const pendingAlerts = getPendingAlertOutboxEntries(100)
+  
+  if (pendingEntries.length === 0 && pendingAlerts.length === 0) {
     const status = getCloudSyncStatus()
     mainWindow?.webContents.send('cloud:sync-status', status)
     return
   }
 
-  const syncUrl = new URL('/readings/sync', baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`).toString()
-  const readings = pendingEntries.map((entry) => JSON.parse(entry.payload_json))
+  const accessToken = await getCloudAuthToken()
+  if (!accessToken) {
+    throw new Error('Unable to authenticate with the cloud backend. Check the deployed backend URL and admin credentials.')
+  }
 
   try {
-    const accessToken = await getCloudAuthToken()
-    if (!accessToken) {
-      throw new Error('Unable to authenticate with the cloud backend. Check the deployed backend URL and admin credentials.')
+    // Sync readings
+    if (pendingEntries.length > 0) {
+      const syncUrl = new URL('/readings/sync', baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`).toString()
+      const readings = pendingEntries.map((entry) => JSON.parse(entry.payload_json))
+
+      const response = await fetch(syncUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({ readings })
+      })
+
+      if (!response.ok) {
+        throw new Error(`Readings sync failed: HTTP ${response.status}: ${response.statusText}`)
+      }
+
+      markOutboxSynced(pendingEntries.map((entry) => entry.id))
     }
 
-    const response = await fetch(syncUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${accessToken}`
-      },
-      body: JSON.stringify({ readings })
-    })
+    // Sync alerts
+    if (pendingAlerts.length > 0) {
+      const alertSyncUrl = new URL('/alerts/sync', baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`).toString()
+      const alerts = pendingAlerts.map((entry) => JSON.parse(entry.payload_json))
 
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+      const response = await fetch(alertSyncUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({ alerts })
+      })
+
+      if (!response.ok) {
+        throw new Error(`Alerts sync failed: HTTP ${response.status}: ${response.statusText}`)
+      }
+
+      markAlertOutboxSynced(pendingAlerts.map((entry) => entry.id))
     }
 
-    markOutboxSynced(pendingEntries.map((entry) => entry.id))
     mainWindow?.webContents.send('cloud:sync-status', getCloudSyncStatus())
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown cloud sync error'
     for (const entry of pendingEntries) {
       markOutboxFailed(entry.id, message)
+    }
+    for (const entry of pendingAlerts) {
+      markAlertOutboxFailed(entry.id, message)
     }
     mainWindow?.webContents.send('cloud:sync-status', getCloudSyncStatus())
   }

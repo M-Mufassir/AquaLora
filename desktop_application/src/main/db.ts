@@ -104,6 +104,18 @@ export function initDb(): Database.Database {
       last_error TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_outbox_status ON outbox (status, created_at);
+
+    CREATE TABLE IF NOT EXISTS alert_outbox (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      alert_id INTEGER NOT NULL,
+      payload_json TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      retry_count INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT,
+      last_error TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_alert_outbox_status ON alert_outbox (status, created_at);
   `)
 
   try {
@@ -239,6 +251,64 @@ export function getCloudSyncStatus(): CloudSyncStatus {
   }
 }
 
+// Alert Outbox Functions (for cloud sync)
+export interface AlertOutboxEntry {
+  id: number
+  alert_id: number
+  payload_json: string
+  status: 'pending' | 'synced' | 'failed'
+  retry_count: number
+  created_at: string
+  updated_at: string | null
+  last_error: string | null
+}
+
+export function queueAlertForSync(alert: Alert): number {
+  const payload = JSON.stringify(alert)
+  const createdAt = new Date().toISOString()
+  const result = db
+    .prepare(
+      `INSERT INTO alert_outbox (alert_id, payload_json, status, retry_count, created_at, updated_at)
+       VALUES (?, ?, 'pending', 0, ?, ?)`
+    )
+    .run(alert.id || 0, payload, createdAt, createdAt)
+
+  return Number(result.lastInsertRowid ?? 0)
+}
+
+export function getPendingAlertOutboxEntries(limit = 100): AlertOutboxEntry[] {
+  return db
+    .prepare(
+      `SELECT id, alert_id, payload_json, status, retry_count, created_at, updated_at, last_error
+       FROM alert_outbox WHERE status IN ('pending', 'failed') ORDER BY created_at ASC LIMIT ?`
+    )
+    .all(limit) as AlertOutboxEntry[]
+}
+
+export function markAlertOutboxSynced(ids: number[]): void {
+  if (ids.length === 0) return
+  const placeholders = ids.map(() => '?').join(',')
+  const updatedAt = new Date().toISOString()
+  db.prepare(
+    `UPDATE alert_outbox SET status = 'synced', updated_at = ?, last_error = NULL WHERE id IN (${placeholders})`
+  ).run(updatedAt, ...ids)
+  setSetting('cloud_sync_last_success_at', updatedAt)
+}
+
+export function markAlertOutboxFailed(id: number, errorMessage: string): void {
+  const updatedAt = new Date().toISOString()
+  const row = db.prepare('SELECT retry_count FROM alert_outbox WHERE id = ?').get(id) as
+    | { retry_count: number }
+    | undefined
+  const nextRetryCount = (row?.retry_count ?? 0) + 1
+
+  db.prepare(
+    `UPDATE alert_outbox SET status = 'pending', retry_count = ?, updated_at = ?, last_error = ?
+     WHERE id = ?`
+  ).run(nextRetryCount, updatedAt, errorMessage, id)
+  setSetting('cloud_sync_last_error', errorMessage)
+}
+
 export function getRecentReadings(nodeId: string, limit = 50): StoredReading[] {
   return db
     .prepare(`SELECT * FROM readings WHERE node_id = ? ORDER BY timestamp DESC LIMIT ?`)
@@ -281,7 +351,16 @@ export function insertAlert(alert: {
        VALUES (@node_id, @timestamp, @parameter, @severity, @message)`
     )
     .run(alert)
-  return db.prepare('SELECT * FROM alerts WHERE id = ?').get(result.lastInsertRowid) as Alert
+  
+  const alertId = Number(result.lastInsertRowid ?? 0)
+  const insertedAlert = db.prepare('SELECT * FROM alerts WHERE id = ?').get(alertId) as Alert
+  
+  // Queue alert for cloud sync
+  if (alertId > 0) {
+    queueAlertForSync(insertedAlert)
+  }
+  
+  return insertedAlert
 }
 
 export function getRecentAlerts(nodeId: string, limit = 50): Alert[] {

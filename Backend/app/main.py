@@ -9,7 +9,7 @@ from sqlmodel import Session, select
 
 from .auth import create_token, verify_token
 from .config import get_settings
-from .database import Reading, get_session, init_db
+from .database import Reading, Alert, get_session, init_db
 
 app = FastAPI(title='AquaLoRa Cloud Backup API')
 settings = get_settings()
@@ -37,8 +37,20 @@ class ReadingPayload(BaseModel):
     rssi: int | None = None
 
 
+class AlertPayload(BaseModel):
+    node_id: str
+    timestamp: str
+    parameter: str  # "temperature", "turbidity", "tds", "ph"
+    severity: str   # "normal", "warning", "critical"
+    message: str
+
+
 class SyncRequest(BaseModel):
     readings: list[ReadingPayload]
+
+
+class AlertsSyncRequest(BaseModel):
+    alerts: list[AlertPayload]
 
 
 @app.on_event('startup')
@@ -156,6 +168,98 @@ def history_readings(
             'pond_type': row.pond_type,
             'battery_pct': row.battery_pct,
             'rssi': row.rssi,
+        }
+        for row in rows
+    ]
+
+
+@app.post('/alerts/sync')
+def sync_alerts(payload: AlertsSyncRequest, _: str = Depends(verify_token)) -> dict[str, Any]:
+    """Sync alerts from desktop app (idempotent)"""
+    if not payload.alerts:
+        return {'received': 0, 'stored': 0}
+
+    with get_session() as session:
+        saved = 0
+        for alert in payload.alerts:
+            # Check if alert already exists (by node_id + timestamp)
+            statement = select(Alert).where(
+                Alert.node_id == alert.node_id,
+                Alert.timestamp == alert.timestamp,
+            )
+            existing = session.exec(statement).first()
+
+            alert_row = Alert(
+                node_id=alert.node_id,
+                timestamp=alert.timestamp,
+                parameter=alert.parameter,
+                severity=alert.severity,
+                message=alert.message,
+                created_at=datetime.now(timezone.utc).isoformat(),
+                synced_at=datetime.now(timezone.utc).isoformat(),
+            )
+
+            if existing is None:
+                session.add(alert_row)
+                saved += 1
+
+        session.commit()
+
+    return {'received': len(payload.alerts), 'stored': saved}
+
+
+@app.get('/alerts/latest')
+def latest_alerts(limit: int = Query(default=20, le=100)) -> list[dict[str, Any]]:
+    """Get latest alerts for all nodes"""
+    with get_session() as session:
+        rows = session.exec(
+            select(Alert).order_by(Alert.timestamp.desc()).limit(limit)
+        ).all()
+
+    return [
+        {
+            'id': row.id,
+            'node_id': row.node_id,
+            'timestamp': row.timestamp,
+            'parameter': row.parameter,
+            'severity': row.severity,
+            'message': row.message,
+            'created_at': row.created_at,
+            'synced_at': row.synced_at,
+        }
+        for row in rows
+    ]
+
+
+@app.get('/alerts/history')
+def alerts_history(
+    node_id: str | None = Query(default=None),
+    start: str | None = Query(default=None),
+    end: str | None = Query(default=None),
+    limit: int = Query(default=100, le=500),
+) -> list[dict[str, Any]]:
+    """Get alert history with optional filters"""
+    with get_session() as session:
+        statement = select(Alert)
+        if node_id:
+            statement = statement.where(Alert.node_id == node_id)
+        if start:
+            statement = statement.where(Alert.timestamp >= start)
+        if end:
+            statement = statement.where(Alert.timestamp <= end)
+        statement = statement.order_by(Alert.timestamp.desc()).limit(limit)
+        rows = session.exec(statement).all()
+
+    return [
+        {
+            'id': row.id,
+            'node_id': row.node_id,
+            'timestamp': row.timestamp,
+            'parameter': row.parameter,
+            'severity': row.severity,
+            'message': row.message,
+            'created_at': row.created_at,
+            'synced_at': row.synced_at,
         }
         for row in rows
     ]

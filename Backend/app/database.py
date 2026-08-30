@@ -24,6 +24,20 @@ class Reading(SQLModel, table=True):
     __table_args__ = {'extend_existing': True}
 
 
+class Alert(SQLModel, table=True):
+    """Alert events synced from desktop app"""
+    id: int | None = Field(default=None, primary_key=True)
+    node_id: str = Field(index=True)
+    timestamp: str = Field(index=True)
+    parameter: str  # "temperature", "turbidity", "tds", "ph"
+    severity: str   # "normal", "warning", "critical"
+    message: str
+    created_at: str | None = None
+    synced_at: str | None = None
+
+    __table_args__ = {'extend_existing': True}
+
+
 def init_db() -> None:
     SQLModel.metadata.create_all(engine)
 
