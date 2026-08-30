@@ -88,34 +88,43 @@ inline void processIncomingLoRa() {
                   g_packetCounter, packetSize, rssi, snr);
     Serial.printf("[LORA RX] Raw Payload: '%s'\n", rawPayload.c_str());
 
-    // Parse comma-separated payload: "Node1,25.40,320,1.50"
+    // Parse comma-separated payload: "Node1,25.40,320,1.50,7.20" or legacy "Node1,25.40,320,1.50"
     String nodeId = "Unknown";
     float tempC = 0.0f;
     int tdsPPM = 0;
     float turbidityNTU = 0.0f;
+    float phVal = 7.0f;
 
     int firstComma = rawPayload.indexOf(',');
     int secondComma = rawPayload.indexOf(',', firstComma + 1);
     int thirdComma = rawPayload.indexOf(',', secondComma + 1);
+    int fourthComma = rawPayload.indexOf(',', thirdComma + 1);
 
     if (firstComma != -1 && secondComma != -1 && thirdComma != -1) {
         nodeId = rawPayload.substring(0, firstComma);
         tempC = rawPayload.substring(firstComma + 1, secondComma).toFloat();
         tdsPPM = rawPayload.substring(secondComma + 1, thirdComma).toInt();
-        turbidityNTU = rawPayload.substring(thirdComma + 1).toFloat();
+        
+        if (fourthComma != -1) {
+            turbidityNTU = rawPayload.substring(thirdComma + 1, fourthComma).toFloat();
+            phVal = rawPayload.substring(fourthComma + 1).toFloat();
+        } else {
+            turbidityNTU = rawPayload.substring(thirdComma + 1).toFloat();
+            phVal = 7.0f;
+        }
 
-        Serial.printf("[PARSED] Node: %s | Temp: %.2f C | TDS: %d ppm | Turbidity: %.2f NTU\n",
-                      nodeId.c_str(), tempC, tdsPPM, turbidityNTU);
+        Serial.printf("[PARSED] Node: %s | Temp: %.2f C | TDS: %d ppm | Turbidity: %.2f NTU | pH: %.2f\n",
+                      nodeId.c_str(), tempC, tdsPPM, turbidityNTU, phVal);
 
         // LIVE REFRESH OLED DISPLAY IMMEDIATELY FOR EVERY RECEIVED PACKET
         updateDisplayLive(nodeId, tempC, tdsPPM, turbidityNTU, rssi, snr, g_packetCounter);
         Serial.println(F("[OLED] Display refreshed with live telemetry readings."));
 
         // BROADCAST ENCRYPTED TELEMETRY TO DASHBOARD VIA WEBSOCKET
-        broadcastLoRaTelemetryWS(nodeId, tempC, tdsPPM, turbidityNTU, rssi);
+        broadcastLoRaTelemetryWS(nodeId, tempC, tdsPPM, turbidityNTU, phVal, rssi);
         Serial.println(F("[WS] Telemetry encrypted & broadcasted to dashboard."));
     } else {
-        Serial.println(F("[PARSER] WARNING: Received payload format invalid! Expected 'NodeID,Temp,TDS,Turb'"));
+        Serial.println(F("[PARSER] WARNING: Received payload format invalid! Expected 'NodeID,Temp,TDS,Turb[,pH]'"));
     }
     Serial.println(F("=================================================="));
 }

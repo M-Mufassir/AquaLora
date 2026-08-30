@@ -121,15 +121,16 @@ void setup() {
     float tempC = 0.0f;
     int tdsPPM = 0;
     float turbidityNTU = 0.0f;
+    float phVal = 7.0f;
 
-    readAllSensors(tempC, tdsPPM, turbidityNTU);
+    readAllSensors(tempC, tdsPPM, turbidityNTU, phVal);
 
     // ========================================================================
-    // FORMAT PAYLOAD AS COMMA-SEPARATED STRING (Node1,Temp,TDS,Turb)
+    // FORMAT PAYLOAD AS COMMA-SEPARATED STRING (Node1,Temp,TDS,Turb,pH)
     // ========================================================================
     char payloadBuffer[64];
-    snprintf(payloadBuffer, sizeof(payloadBuffer), "%s,%.2f,%d,%.2f", 
-             NODE_ID, tempC, tdsPPM, turbidityNTU);
+    snprintf(payloadBuffer, sizeof(payloadBuffer), "%s,%.2f,%d,%.2f,%.2f", 
+             NODE_ID, tempC, tdsPPM, turbidityNTU, phVal);
     
     String telemetryPayload = String(payloadBuffer);
     Serial.printf("[TELEMETRY] Formatted Payload: '%s'\n", telemetryPayload.c_str());

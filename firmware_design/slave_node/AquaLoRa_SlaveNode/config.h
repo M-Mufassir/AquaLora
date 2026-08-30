@@ -31,6 +31,7 @@
 // --- 1. SENSORS PINOUT ---
 #define TDS_PIN                 34              ///< Analog Input (ADC1_CH6) - Water TDS / EC Sensor
 #define TURBIDITY_PIN           35              ///< Analog Input (ADC1_CH7) - Optical Turbidity Sensor
+#define PH_PIN                  32              ///< Analog Input (ADC1_CH4) - Analog pH Sensor Probe
 #define ONE_WIRE_BUS            4               ///< Digital I/O (OneWire) - DS18B20 Temperature Sensor
 
 // --- 2. I2C BUS PINOUT (RTC PCF8563) ---

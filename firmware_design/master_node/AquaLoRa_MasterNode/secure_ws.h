@@ -271,7 +271,7 @@ inline void sendNodeListWS(uint8_t clientId)
 /**
  * @brief Broadcast real received LoRa telemetry data to connected dashboard clients.
  */
-inline void broadcastLoRaTelemetryWS(const String &nodeId, float temp, int tds, float turb, int rssi)
+inline void broadcastLoRaTelemetryWS(const String &nodeId, float temp, int tds, float turb, float ph, int rssi)
 {
     registerNode(nodeId);
 
@@ -281,7 +281,7 @@ inline void broadcastLoRaTelemetryWS(const String &nodeId, float temp, int tds, 
     doc["temperature"] = temp;
     doc["turbidity"] = turb;
     doc["tds"] = tds;
-    doc["ph"] = 7.0f;
+    doc["ph"] = ph;
     doc["battery_pct"] = 95; // Telemetry default
     doc["rssi"] = rssi;
 

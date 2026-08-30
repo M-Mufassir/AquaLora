@@ -137,12 +137,36 @@ inline float readTurbidity() {
 }
 
 /**
- * @brief Unified helper function to sample all sensors in a single pass.
+ * @brief Read analog pH sensor probe voltage and calculate pH.
+ * 
+ * @return Calculated pH value (0.0 - 14.0).
  */
-inline void readAllSensors(float &temp, int &tds, float &turbidity) {
+inline float readPH() {
+    long analogSum = 0;
+    for (int i = 0; i < ADC_SAMPLES; i++) {
+        analogSum += analogRead(PH_PIN);
+        delay(10);
+    }
+    float averageAnalog = (float)analogSum / (float)ADC_SAMPLES;
+    float voltage = (averageAnalog / ADC_RESOLUTION) * ADC_VREF;
+
+    // Standard analog pH sensor calibration formula: pH = 3.5 * voltage + offset
+    float ph = 3.5f * voltage;
+    if (ph < 0.0f) ph = 0.0f;
+    if (ph > 14.0f) ph = 14.0f;
+
+    Serial.printf("[SENSORS] pH Analog Raw: %.0f | Voltage: %.2fV | pH: %.2f\n", averageAnalog, voltage, ph);
+    return ph;
+}
+
+/**
+ * @brief Unified helper function to sample all 4 sensors in a single pass.
+ */
+inline void readAllSensors(float &temp, int &tds, float &turbidity, float &ph) {
     temp = readTemperature();
     tds = readTDS(temp);
     turbidity = readTurbidity();
+    ph = readPH();
 }
 
 #endif // SENSORS_H
