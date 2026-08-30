@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Query, status
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
@@ -14,6 +15,14 @@ from .database import Reading, Alert, get_session, init_db
 app = FastAPI(title='AquaLoRa Cloud Backup API')
 settings = get_settings()
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=['*'],
+    allow_credentials=True,
+    allow_methods=['*'],
+    allow_headers=['*'],
+)
+
 
 class LoginRequest(BaseModel):
     username: str
@@ -22,7 +31,10 @@ class LoginRequest(BaseModel):
 
 class LoginResponse(BaseModel):
     access_token: str
+    token: str | None = None
     token_type: str = 'bearer'
+    username: str | None = None
+    role: str = 'Administrator'
 
 
 class ReadingPayload(BaseModel):
@@ -68,7 +80,14 @@ def login(payload: LoginRequest) -> LoginResponse:
     if payload.username != settings.admin_username or payload.password != settings.admin_password:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Invalid credentials')
 
-    return LoginResponse(access_token=create_token(payload.username))
+    token_str = create_token(payload.username)
+    return LoginResponse(
+        access_token=token_str,
+        token=token_str,
+        token_type='bearer',
+        username=payload.username,
+        role='Administrator',
+    )
 
 
 @app.post('/readings/sync')
