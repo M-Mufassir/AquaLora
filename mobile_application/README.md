@@ -1,25 +1,21 @@
 # AquaLora Mobile – Quick Start Guide
 
 ## Overview
-This repository now contains a **minimal mobile client** (React Native using Expo) that authenticates against the existing AquaLora backend.  The authentication logic re‑uses the SQLite database created by the desktop application, so the default admin credentials are:
 
-```
-Username: Admin
-Password: Admin123
-```
+The **AquaLoRa Mobile App** is a React Native (Expo) client that connects directly to the AquaLoRa backend API. It is a **completely independent system** from the desktop application — both authenticate separately against the same backend and read data from the same PostgreSQL database.
 
-The setup consists of three parts:
-
-1. **`mobile_app/`** – React Native (Expo) UI with a login screen.
-2. **`mobile_auth_server/`** – a tiny Express server that reads the same SQLite DB and implements `POST /auth/login`.
-3. **Desktop application** – unchanged; it already creates the SQLite DB and admin user on first run.
+**Architecture**:
+- **Desktop app**: Works offline with local SQLite, syncs to backend when online
+- **Mobile app**: Reads from backend API (no local database)
+- **Backend API**: Single source of truth for all cloud data
+- **Credentials**: Configured on backend; both apps use same credentials
 
 ## Prerequisites
 - Node.js **≥ 20** (download from https://nodejs.org)
-- **Yarn** or **npm** (the commands below use npm)
+- **npm** or **yarn** (commands below use npm)
 - **Expo CLI** (global install): `npm install -g expo-cli`
-- A recent version of **Android Studio** (for Android emulator) **or** the Expo Go app on a physical device (iOS or Android).
-- The **desktop application** must have been started at least once so that the `aqualora.db` file exists in the user‑data directory.
+- Android Studio (for Android emulator) **OR** Expo Go app on a physical device
+- **Backend must be running** — either locally (`http://localhost:8000`) or on Railway
 
 ## Folder structure
 ```
@@ -75,20 +71,41 @@ npm run start   # opens the Expo dev tools in a browser
 3. On success, you are navigated to a placeholder Home screen.
 4. Wrong credentials show an alert “Login failed”.
 
-## Adding more users
-The desktop application already contains a **Users** screen where you can create new accounts. Those accounts are stored in the same SQLite DB, so the mobile app will automatically recognise them once the auth server is restarted.
+## Credentials & User Management
+
+Credentials are configured on the backend API (in `.env` or Railway dashboard):
+
+```env
+ADMIN_USERNAME=Admin
+ADMIN_PASSWORD=Admin123
+JWT_SECRET=your-secret-key
+```
+
+Both desktop and mobile apps authenticate against these same backend credentials.
+
+**Future**: When the backend supports per-user authentication, both apps will auto-support it.
 
 ## Troubleshooting
-- **CORS errors** – the auth server enables CORS for all origins. If you run the server on a different host/IP, update the URL in `LoginScreen.tsx`.
-- **Android emulator cannot reach localhost** – use `10.0.2.2` instead of `localhost` in the Axios URL, or run the app on a physical device with the same network.
-- **Database not found** – make sure the desktop app has been launched at least once. The DB lives in `%APPDATA%\AquaLora\aqualora.db` on Windows.
-- **Port already in use** – change the `PORT` variable in `mobile_auth_server/.env` and update the URL in the mobile code accordingly.
 
-## Next steps (beyond login)
-- Persist authentication state (e.g., using SecureStore).
-- Fetch node‑list and readings via additional endpoints on the auth server.
-- Implement real‑time updates using WebSockets.
-- Add proper navigation and UI components for Home, Nodes, Settings, etc.
+| Problem | Solution |
+|---------|----------|
+| **"Cannot reach backend"** | Verify backend is running, check `API_BASE_URL` in `config.ts` |
+| **"Login failed" (401)** | Check credentials against backend config (default: Admin/Admin123) |
+| **"Android emulator can't reach localhost"** | Use `http://10.0.2.2:8000` instead of `http://localhost:8000` |
+| **CORS errors** | Backend should enable CORS for mobile client IP |
+| **Token expired** | Implement token refresh in future iterations |
+
+## Next Steps
+
+1. **Dashboard readings**: Fetch from backend `/readings/latest`
+2. **History view**: Fetch from backend `/readings/history` with time filters
+3. **Alert display**: Once backend adds `/alerts/latest`, display alerts
+4. **Persistent login**: Use Async Storage or Secure Store to save token
+5. **Push notifications**: Set up Firebase Cloud Messaging (FCM) for alerts
+6. **Real-time updates**: Implement WebSocket or polling for live readings
 
 ---
-*Happy coding! If you run into any issues, feel free to ask for further assistance.*
+
+**Related docs**:
+- [Backend/README.md](../Backend/README.md) — API setup & deployment
+- [Main README.md](../README.md) — System architecture overview

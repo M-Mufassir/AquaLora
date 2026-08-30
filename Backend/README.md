@@ -1,14 +1,35 @@
 # AquaLoRa Backend
 
-This folder contains the cloud backup backend for the AquaLoRa project. It is designed to receive synced data from the desktop app and store it in PostgreSQL as a full secondary copy of the pond readings.
+This folder contains the cloud backup backend for the AquaLoRa project. It is designed to receive synced data from the desktop app and serve data to the mobile app. Both desktop and mobile apps are independent, connected only through this PostgreSQL backend.
+
+## Architecture
+
+```
+Desktop App (Electron, SQLite)
+  └─ POST /readings/sync ──→ Backend (FastAPI, PostgreSQL)
+                              ├─ /auth/login (both apps)
+                              ├─ /readings/latest (mobile reads)
+                              ├─ /readings/history (mobile reads)
+                              └─ /alerts/sync (future)
+  ←─────────────────────────── Mobile App (React Native)
+                              └─ reads via API (independent)
+```
+
+## Clients
+
+| Client | Purpose | Auth | Usage |
+|--------|---------|------|-------|
+| **Desktop App** | Write readings, offline monitoring | JWT | POST /readings/sync, GET /readings/latest |
+| **Mobile App** | Read readings remotely | JWT | GET /readings/latest, GET /readings/history |
 
 ## Features
 
 - `GET /health` health check
-- `POST /auth/login` for the shared admin credential
-- `POST /readings/sync` idempotent batch sync from the desktop app
-- `GET /readings/latest` latest reading per node
-- `GET /readings/history` time-window history
+- `POST /auth/login` authentication endpoint (used by desktop and mobile)
+- `POST /readings/sync` idempotent batch sync from desktop app
+- `GET /readings/latest` latest reading per node (read by both apps)
+- `GET /readings/history` time-window history (read by mobile)
+- `POST /alerts/sync` alert sync from desktop (planned)
 
 ---
 
