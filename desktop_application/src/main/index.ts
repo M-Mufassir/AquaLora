@@ -60,6 +60,7 @@ import type { Score } from '../shared/types'
 const OFFLINE_CHECK_INTERVAL_MS = 30_000
 const OFFLINE_THRESHOLD_MS = 5 * 60_000
 const CLOUD_SYNC_INTERVAL_MS = 2 * 60_000
+const NETWORK_CHECK_TIMEOUT_MS = 5_000
 
 let mainWindow: BrowserWindow
 const masterNodeClient = new MasterNodeClient()
@@ -70,7 +71,28 @@ async function getCloudAuthToken(): Promise<string | null> {
   return session?.token ?? null
 }
 
-async function syncQueuedReadings(): Promise<void> {
+/**
+ * Check if internet is available via DNS lookup.
+ * Attempts to resolve google-dns-a.google.com (IP 8.8.8.8).
+ * Returns true if resolvable within timeout, false otherwise.
+ */
+async function checkInternetConnectivity(): Promise<boolean> {
+  try {
+    // Use DNS lookup as a lightweight internet check
+    const { promises: dnsPromises } = await import('dns')
+    const lookupPromise = dnsPromises.resolve4('google-dns-a.google.com')
+    const timeoutPromise = new Promise<never>((_resolve, reject) =>
+      setTimeout(() => reject(new Error('DNS timeout')), NETWORK_CHECK_TIMEOUT_MS)
+    )
+    await Promise.race([lookupPromise, timeoutPromise])
+    return true
+  } catch (err) {
+    console.debug('[main] Internet check failed (assumed offline):', err instanceof Error ? err.message : String(err))
+    return false
+  }
+}
+
+async function syncQueuedReadings(isManual = false): Promise<void> {
   const baseUrl = getSettingOptional('cloud_sync_url')?.trim()
   if (!baseUrl) {
     return
@@ -83,6 +105,17 @@ async function syncQueuedReadings(): Promise<void> {
     const status = getCloudSyncStatus()
     mainWindow?.webContents.send('cloud:sync-status', status)
     return
+  }
+
+  // Check internet connectivity only for automatic syncs (not manual)
+  if (!isManual) {
+    const hasInternet = await checkInternetConnectivity()
+    if (!hasInternet) {
+      console.debug('[main] Skipping automatic cloud sync: no internet connectivity')
+      const status = getCloudSyncStatus()
+      mainWindow?.webContents.send('cloud:sync-status', status)
+      return
+    }
   }
 
   const accessToken = await getCloudAuthToken()
@@ -324,7 +357,8 @@ app.whenReady().then(() => {
 
   ipcMain.handle('cloud:sync-status', () => getCloudSyncStatus())
   ipcMain.handle('cloud:sync', async () => {
-    await syncQueuedReadings()
+    // Manual sync always attempts regardless of network (user can see the error)
+    await syncQueuedReadings(true)
     return getCloudSyncStatus()
   })
 
@@ -611,10 +645,23 @@ app.whenReady().then(() => {
   }, OFFLINE_CHECK_INTERVAL_MS)
 
   setInterval(() => {
-    void syncQueuedReadings()
+    void (async () => {
+      try {
+        await syncQueuedReadings(false)
+      } catch (err) {
+        console.error('[main] Automatic cloud sync failed:', err instanceof Error ? err.message : String(err))
+      }
+    })()
   }, CLOUD_SYNC_INTERVAL_MS)
 
-  void syncQueuedReadings()
+  // Initial sync on startup (waits for internet)
+  void (async () => {
+    try {
+      await syncQueuedReadings(false)
+    } catch (err) {
+      console.debug('[main] Startup cloud sync skipped (likely offline):', err instanceof Error ? err.message : String(err))
+    }
+  })()
 
   createWindow()
 
