@@ -60,10 +60,10 @@ export async function connectToNetwork(ssid: string, password: string): Promise<
 export async function getCurrentConnection(): Promise<WifiConnectionState> {
   ensureInit()
   try {
-    const statusPromise = wifi.getCurrentConnections().then((conns) => ({
+    const statusPromise: Promise<WifiConnectionState> = wifi.getCurrentConnections().then((conns) => ({
       ssid: conns[0]?.ssid ?? null
     }))
-    return await withTimeout(statusPromise, 2000, { ssid: null })
+    return await withTimeout<WifiConnectionState>(statusPromise, 2000, { ssid: null })
   } catch (err) {
     console.warn('[wifiManager] Failed to fetch current connection:', err)
     return { ssid: null }

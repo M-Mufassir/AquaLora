@@ -69,3 +69,76 @@ export interface AppError {
 export type LoadingState = 'idle' | 'loading' | 'success' | 'error';
 
 export type SeverityLevel = 'normal' | 'warning' | 'critical';
+
+// ─── Node Configuration & Pond Threshold Profiles ────────────────────────────
+
+export interface ThresholdRange {
+  min: number;
+  max: number;
+}
+
+export interface PondThresholdProfile {
+  temperature: ThresholdRange;
+  turbidity: ThresholdRange;
+  tds: ThresholdRange;
+  ph: ThresholdRange;
+}
+
+export type PondType = 'tilapia' | 'prawn' | 'catfish' | 'tuna' | 'salmon' | 'general';
+
+export const DEFAULT_POND_PROFILES: Record<PondType, PondThresholdProfile> = {
+  tilapia: {
+    temperature: { min: 20, max: 30 },
+    turbidity: { min: 0, max: 5 },
+    tds: { min: 200, max: 800 },
+    ph: { min: 6.5, max: 8.5 },
+  },
+  prawn: {
+    temperature: { min: 24, max: 30 },
+    turbidity: { min: 0, max: 3 },
+    tds: { min: 500, max: 1200 },
+    ph: { min: 7.2, max: 8.5 },
+  },
+  catfish: {
+    temperature: { min: 22, max: 32 },
+    turbidity: { min: 0, max: 8 },
+    tds: { min: 150, max: 700 },
+    ph: { min: 6.0, max: 8.5 },
+  },
+  tuna: {
+    temperature: { min: 18, max: 28 },
+    turbidity: { min: 0, max: 2 },
+    tds: { min: 30000, max: 40000 },
+    ph: { min: 7.8, max: 8.3 },
+  },
+  salmon: {
+    temperature: { min: 10, max: 18 },
+    turbidity: { min: 0, max: 3 },
+    tds: { min: 200, max: 600 },
+    ph: { min: 6.5, max: 8.0 },
+  },
+  general: {
+    temperature: { min: 18, max: 32 },
+    turbidity: { min: 0, max: 10 },
+    tds: { min: 0, max: 1200 },
+    ph: { min: 4.0, max: 10.0 },
+  },
+};
+
+export interface NodeConfig {
+  id: number;
+  master_node_id: number;
+  node_id: string;
+  name: string | null;
+  location: string | null;
+  pond_type: PondType;
+  custom_profile: PondThresholdProfile | null;
+  updated_at: string | null;
+}
+
+export function getEffectiveProfile(config?: NodeConfig | null): PondThresholdProfile {
+  if (config?.custom_profile) return config.custom_profile;
+  const pt = (config?.pond_type || 'tilapia') as PondType;
+  return DEFAULT_POND_PROFILES[pt] || DEFAULT_POND_PROFILES.general;
+}
+

@@ -73,47 +73,47 @@ AquaLoRa now extends beyond desktop-only:
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│ LAYER 1: LOCAL (Source of Truth)                                 │
+│ LAYER 1: LOCAL WORKSTATION (Offline-First Monitoring)             │
 │ ┌────────────────────────────────────────────────────────────┐   │
 │ │ Desktop App (Electron + React + TypeScript)                │   │
 │ │ ├─ Primary DB: SQLite (aqualora.db)                        │   │
 │ │ ├─ Sensors: Temperature, Turbidity, TDS, pH               │   │
+│ │ ├─ Workstation Activation: safeStorage Encrypted Session   │   │
 │ │ ├─ Alerts: Threshold-based + Staleness (1h timeout)       │   │
 │ │ ├─ Decision Engine: Fish Health Index (Python subprocess) │   │
-│ │ └─ Sync Queue: Outbox pattern (readings + alerts)         │   │
+│ │ └─ Sync Outbox: Queues readings + alerts per Master Node  │   │
 │ └────────────────────────────────────────────────────────────┘   │
-│                           │ (background sync, ~2–5 min interval) │
+│                           │ (background sync, ~2 min interval)   │
 └───────────────────────────┼──────────────────────────────────────┘
                             ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│ LAYER 2: CLOUD (Secondary Backup)                                │
+│ LAYER 2: MULTI-TENANT CLOUD BACKEND                              │
 │ ┌────────────────────────────────────────────────────────────┐   │
-│ │ FastAPI Backend (Python + PostgreSQL on Railway)           │   │
-│ │ ├─ Endpoints: /health, /auth/login, /readings/sync,       │   │
-│ │ │             /readings/latest, /readings/history         │   │
-│ │ ├─ Full secondary copy of all readings                    │   │
-│ │ ├─ Sync status tracking (pending/synced/failed)           │   │
-│ │ └─ JWT authentication for mobile + desktop               │   │
+│ │ FastAPI Backend (Python + PostgreSQL / SQLModel)           │   │
+│ │ ├─ Multi-Tenant Data Isolation (MasterNode table & FKs)   │   │
+│ │ ├─ Endpoints: /master-nodes/directory, /auth/login,        │   │
+│ │ │             /master-nodes/me, /readings/sync, /latest,   │   │
+│ │ │             /alerts/sync, /alerts/latest, /alerts/history│   │
+│ │ ├─ Bcrypt password hashing & JWT tenant scoping            │   │
+│ │ └─ Super-admin provisioning & profile management          │   │
 │ └────────────────────────────────────────────────────────────┘   │
-│                           │ (mobile reads cloud DB)               │
+│                           │ (per-tenant scoped API reads)        │
 └───────────────────────────┼──────────────────────────────────────┘
                             ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│ LAYER 3: MOBILE (Remote Access)                                  │
+│ LAYER 3: MOBILE APPLICATION (Remote Facility Access)             │
 │ ┌────────────────────────────────────────────────────────────┐   │
-│ │ React Native Mobile App (Expo)                             │   │
-│ │ ├─ Current readings: from Backend PostgreSQL              │   │
-│ │ ├─ Historical data: from Backend PostgreSQL               │   │
-│ │ ├─ Push alerts: via FCM (Firebase Cloud Messaging)        │   │
-│ │ ├─ Login: via mobile auth server (reads desktop SQLite)   │   │
-│ │ └─ Network-dependent (assumes stable internet)            │   │
+│ │ React Native Mobile App (Expo SDK 57)                      │   │
+│ │ ├─ Dynamic Master Node Selection & Facility Sign-In       │   │
+│ │ ├─ Live Pond Telemetry & Historical Trends (Scoped)        │   │
+│ │ ├─ Critical Alerts & Push Notifications                    │   │
+│ │ ├─ Master Node Facility Profile & Species Configuration   │   │
+│ │ └─ SecureStore Encrypted Token Storage                     │   │
 │ └────────────────────────────────────────────────────────────┘   │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-**Design Principle**: Desktop SQLite is the **permanent system of record**. The backend Postgres is a **full secondary backup** — if the desktop app is offline, mobile can still access historical data from the cloud. If the cloud is down, the desktop app continues monitoring with zero degradation.
-
-**Implementation Status**: See `PROJECT_ANALYSIS_AND_ISSUES.md` for detailed implementation checklist and known gaps.
+**Design Principle**: Desktop SQLite is the **permanent system of record**. The multi-tenant backend Postgres is a **per-tenant cloud hub** — each customer's Master Node owns its telemetry and alert records. Workstations authenticate once via OS keychain encryption and operate seamlessly offline. Mobile apps read scoped live data on demand without cross-tenant interference.
 
 ## 3. Repository Structure
 

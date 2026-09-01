@@ -1,18 +1,20 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+import json
 from sqlmodel import Session, select
 
-from .auth import create_token, verify_token
+from .auth import create_token, hash_password, require_super_admin, verify_password, verify_token
 from .config import get_settings
-from .database import Reading, Alert, get_session, init_db
+from .database import Alert, MasterNode, NodeConfig, Reading, get_session, init_db
 
-app = FastAPI(title='AquaLoRa Cloud Backup API')
+
+app = FastAPI(title='AquaLoRa Multi-Tenant Cloud API')
 settings = get_settings()
 
 app.add_middleware(
@@ -25,7 +27,8 @@ app.add_middleware(
 
 
 class LoginRequest(BaseModel):
-    username: str
+    node_code: str | None = None
+    username: str | None = None  # fallback for legacy client callers
     password: str
 
 
@@ -33,8 +36,55 @@ class LoginResponse(BaseModel):
     access_token: str
     token: str | None = None
     token_type: str = 'bearer'
-    username: str | None = None
-    role: str = 'Administrator'
+    node_code: str
+    username: str
+    display_name: str
+    role: str
+    master_node_id: int
+
+
+class MasterNodeDirectoryItem(BaseModel):
+    node_code: str
+    display_name: str
+
+
+class MasterNodeProfileResponse(BaseModel):
+    id: int
+    node_code: str
+    display_name: str
+    contact_name: str | None = None
+    contact_phone: str | None = None
+    site_location: str | None = None
+    pond_type: str | None = None
+    installed_at: str | None = None
+    role: str
+    status: str
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+class MasterNodeProfileUpdateRequest(BaseModel):
+    display_name: str | None = None
+    contact_name: str | None = None
+    contact_phone: str | None = None
+    site_location: str | None = None
+    pond_type: str | None = None
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
+class CreateMasterNodeRequest(BaseModel):
+    node_code: str
+    display_name: str
+    password: str
+    contact_name: str | None = None
+    contact_phone: str | None = None
+    site_location: str | None = None
+    pond_type: str | None = None
+    role: str = 'customer'
 
 
 class ReadingPayload(BaseModel):
@@ -65,9 +115,63 @@ class AlertsSyncRequest(BaseModel):
     alerts: list[AlertPayload]
 
 
+class NodeConfigPayload(BaseModel):
+    node_id: str
+    name: str | None = None
+    location: str | None = None
+    pond_type: str = 'tilapia'
+    custom_profile: dict[str, Any] | str | None = None
+
+
+class NodeConfigSyncRequest(BaseModel):
+    nodes: list[NodeConfigPayload]
+
+
+class NodeConfigResponse(BaseModel):
+    id: int
+    master_node_id: int
+    node_id: str
+    name: str | None = None
+    location: str | None = None
+    pond_type: str = 'tilapia'
+    custom_profile: dict[str, Any] | str | None = None
+    updated_at: str | None = None
+
+
+class NodeConfigUpdateRequest(BaseModel):
+    name: str | None = None
+    location: str | None = None
+    pond_type: str | None = None
+    custom_profile: dict[str, Any] | str | None = None
+
+
+
+def seed_default_master_node() -> None:
+    with get_session() as session:
+        existing = session.exec(select(MasterNode)).first()
+        if existing is None:
+            now_iso = datetime.now(timezone.utc).isoformat()
+            default_node = MasterNode(
+                node_code='AQL-0001',
+                display_name='Default AquaLoRa Master Node',
+                password_hash=hash_password(settings.admin_password),
+                contact_name='AquaLoRa Admin',
+                site_location='Primary Facility',
+                pond_type='tilapia',
+                installed_at=now_iso,
+                role='super_admin',
+                status='active',
+                created_at=now_iso,
+                updated_at=now_iso,
+            )
+            session.add(default_node)
+            session.commit()
+
+
 @app.on_event('startup')
 def startup_event() -> None:
     init_db()
+    seed_default_master_node()
 
 
 @app.get('/health')
@@ -75,36 +179,239 @@ def health() -> dict[str, str]:
     return {'status': 'ok'}
 
 
+@app.get('/master-nodes/directory', response_model=list[MasterNodeDirectoryItem])
+def list_directory() -> list[MasterNodeDirectoryItem]:
+    """Public directory listing of active master nodes for client login dropdowns."""
+    with get_session() as session:
+        nodes = session.exec(
+            select(MasterNode)
+            .where(MasterNode.status == 'active')
+            .order_by(MasterNode.node_code)
+        ).all()
+        return [
+            MasterNodeDirectoryItem(node_code=node.node_code, display_name=node.display_name)
+            for node in nodes
+        ]
+
+
 @app.post('/auth/login', response_model=LoginResponse)
 def login(payload: LoginRequest) -> LoginResponse:
-    if payload.username != settings.admin_username or payload.password != settings.admin_password:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Invalid credentials')
+    identifier = (payload.node_code or payload.username or '').strip()
+    if not identifier:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail='Master node code or username is required',
+        )
 
-    token_str = create_token(payload.username)
-    return LoginResponse(
-        access_token=token_str,
-        token=token_str,
-        token_type='bearer',
-        username=payload.username,
-        role='Administrator',
-    )
+    with get_session() as session:
+        statement = select(MasterNode).where(
+            (MasterNode.node_code.ilike(identifier)) | (MasterNode.node_code == identifier)
+        )
+        node = session.exec(statement).first()
+
+        if node is None:
+            # Check if identifier matches default super admin config and seed if missing
+            if identifier.lower() == settings.admin_username.lower():
+                node = session.exec(select(MasterNode).where(MasterNode.role == 'super_admin')).first()
+
+        if node is None or node.status != 'active':
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail='Invalid credentials or inactive account',
+            )
+
+        if not verify_password(payload.password, node.password_hash):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail='Invalid credentials',
+            )
+
+        token_str = create_token(
+            master_node_id=node.id,
+            node_code=node.node_code,
+            role=node.role,
+        )
+
+        return LoginResponse(
+            access_token=token_str,
+            token=token_str,
+            token_type='bearer',
+            node_code=node.node_code,
+            username=node.node_code,
+            display_name=node.display_name,
+            role=node.role,
+            master_node_id=node.id,
+        )
+
+
+@app.get('/master-nodes/me', response_model=MasterNodeProfileResponse)
+def get_my_profile(claims: dict[str, Any] = Depends(verify_token)) -> MasterNodeProfileResponse:
+    with get_session() as session:
+        node = session.get(MasterNode, claims['master_node_id'])
+        if node is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Master node not found')
+        return MasterNodeProfileResponse(
+            id=node.id,
+            node_code=node.node_code,
+            display_name=node.display_name,
+            contact_name=node.contact_name,
+            contact_phone=node.contact_phone,
+            site_location=node.site_location,
+            pond_type=node.pond_type,
+            installed_at=node.installed_at,
+            role=node.role,
+            status=node.status,
+            created_at=node.created_at,
+            updated_at=node.updated_at,
+        )
+
+
+@app.patch('/master-nodes/me', response_model=MasterNodeProfileResponse)
+def update_my_profile(
+    payload: MasterNodeProfileUpdateRequest,
+    claims: dict[str, Any] = Depends(verify_token),
+) -> MasterNodeProfileResponse:
+    with get_session() as session:
+        node = session.get(MasterNode, claims['master_node_id'])
+        if node is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Master node not found')
+
+        if payload.display_name is not None and payload.display_name.strip():
+            node.display_name = payload.display_name.strip()
+        if payload.contact_name is not None:
+            node.contact_name = payload.contact_name.strip() or None
+        if payload.contact_phone is not None:
+            node.contact_phone = payload.contact_phone.strip() or None
+        if payload.site_location is not None:
+            node.site_location = payload.site_location.strip() or None
+        if payload.pond_type is not None:
+            node.pond_type = payload.pond_type.strip() or None
+
+        node.updated_at = datetime.now(timezone.utc).isoformat()
+        session.add(node)
+        session.commit()
+        session.refresh(node)
+
+        return MasterNodeProfileResponse(
+            id=node.id,
+            node_code=node.node_code,
+            display_name=node.display_name,
+            contact_name=node.contact_name,
+            contact_phone=node.contact_phone,
+            site_location=node.site_location,
+            pond_type=node.pond_type,
+            installed_at=node.installed_at,
+            role=node.role,
+            status=node.status,
+            created_at=node.created_at,
+            updated_at=node.updated_at,
+        )
+
+
+@app.post('/auth/change-password')
+def change_password_endpoint(
+    payload: ChangePasswordRequest,
+    claims: dict[str, Any] = Depends(verify_token),
+) -> dict[str, str]:
+    if not payload.new_password or len(payload.new_password) < 6:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail='New password must be at least 6 characters',
+        )
+
+    with get_session() as session:
+        node = session.get(MasterNode, claims['master_node_id'])
+        if node is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Master node not found')
+
+        if not verify_password(payload.current_password, node.password_hash):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail='Current password does not match',
+            )
+
+        node.password_hash = hash_password(payload.new_password)
+        node.updated_at = datetime.now(timezone.utc).isoformat()
+        session.add(node)
+        session.commit()
+
+    return {'message': 'Password updated successfully'}
+
+
+@app.post('/master-nodes', response_model=MasterNodeProfileResponse, status_code=status.HTTP_201_CREATED)
+def create_master_node(
+    payload: CreateMasterNodeRequest,
+    _: dict[str, Any] = Depends(require_super_admin),
+) -> MasterNodeProfileResponse:
+    code = payload.node_code.strip().upper()
+    if not code:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Node code is required')
+
+    with get_session() as session:
+        existing = session.exec(select(MasterNode).where(MasterNode.node_code == code)).first()
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f'Master node with code {code} already exists',
+            )
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        new_node = MasterNode(
+            node_code=code,
+            display_name=payload.display_name.strip(),
+            password_hash=hash_password(payload.password),
+            contact_name=payload.contact_name.strip() if payload.contact_name else None,
+            contact_phone=payload.contact_phone.strip() if payload.contact_phone else None,
+            site_location=payload.site_location.strip() if payload.site_location else None,
+            pond_type=payload.pond_type.strip() if payload.pond_type else None,
+            installed_at=now_iso,
+            role=payload.role if payload.role in ('customer', 'super_admin') else 'customer',
+            status='active',
+            created_at=now_iso,
+            updated_at=now_iso,
+        )
+        session.add(new_node)
+        session.commit()
+        session.refresh(new_node)
+
+        return MasterNodeProfileResponse(
+            id=new_node.id,
+            node_code=new_node.node_code,
+            display_name=new_node.display_name,
+            contact_name=new_node.contact_name,
+            contact_phone=new_node.contact_phone,
+            site_location=new_node.site_location,
+            pond_type=new_node.pond_type,
+            installed_at=new_node.installed_at,
+            role=new_node.role,
+            status=new_node.status,
+            created_at=new_node.created_at,
+            updated_at=new_node.updated_at,
+        )
 
 
 @app.post('/readings/sync')
-def sync_readings(payload: SyncRequest, _: str = Depends(verify_token)) -> dict[str, Any]:
+def sync_readings(
+    payload: SyncRequest,
+    claims: dict[str, Any] = Depends(verify_token),
+) -> dict[str, Any]:
     if not payload.readings:
         return {'received': 0, 'stored': 0}
+
+    master_node_id = claims['master_node_id']
 
     with get_session() as session:
         saved = 0
         for reading in payload.readings:
             statement = select(Reading).where(
+                Reading.master_node_id == master_node_id,
                 Reading.node_id == reading.node_id,
                 Reading.timestamp == reading.timestamp,
             )
             existing = session.exec(statement).first()
 
             row = Reading(
+                master_node_id=master_node_id,
                 node_id=reading.node_id,
                 timestamp=reading.timestamp,
                 temperature=reading.temperature,
@@ -139,12 +446,20 @@ def sync_readings(payload: SyncRequest, _: str = Depends(verify_token)) -> dict[
 
 
 @app.get('/readings/latest')
-def latest_readings() -> list[dict[str, Any]]:
+def latest_readings(claims: dict[str, Any] = Depends(verify_token)) -> list[dict[str, Any]]:
+    master_node_id = claims['master_node_id']
     with get_session() as session:
-        rows = session.exec(select(Reading).order_by(Reading.timestamp.desc())).all()
+        statement = (
+            select(Reading)
+            .where(Reading.master_node_id == master_node_id)
+            .order_by(Reading.timestamp.desc())
+        )
+        rows = session.exec(statement).all()
         latest: dict[str, Reading] = {}
         for row in rows:
-            latest[row.node_id] = row
+            if row.node_id not in latest:
+                latest[row.node_id] = row
+
         return [
             {
                 'node_id': row.node_id,
@@ -166,9 +481,11 @@ def history_readings(
     start: str | None = Query(default=None),
     end: str | None = Query(default=None),
     limit: int = Query(default=100, le=500),
+    claims: dict[str, Any] = Depends(verify_token),
 ) -> list[dict[str, Any]]:
+    master_node_id = claims['master_node_id']
     with get_session() as session:
-        statement = select(Reading)
+        statement = select(Reading).where(Reading.master_node_id == master_node_id)
         if start:
             statement = statement.where(Reading.timestamp >= start)
         if end:
@@ -193,22 +510,28 @@ def history_readings(
 
 
 @app.post('/alerts/sync')
-def sync_alerts(payload: AlertsSyncRequest, _: str = Depends(verify_token)) -> dict[str, Any]:
-    """Sync alerts from desktop app (idempotent)"""
+def sync_alerts(
+    payload: AlertsSyncRequest,
+    claims: dict[str, Any] = Depends(verify_token),
+) -> dict[str, Any]:
+    """Sync alerts from desktop app scoped to authenticated master node (idempotent)"""
     if not payload.alerts:
         return {'received': 0, 'stored': 0}
+
+    master_node_id = claims['master_node_id']
 
     with get_session() as session:
         saved = 0
         for alert in payload.alerts:
-            # Check if alert already exists (by node_id + timestamp)
             statement = select(Alert).where(
+                Alert.master_node_id == master_node_id,
                 Alert.node_id == alert.node_id,
                 Alert.timestamp == alert.timestamp,
             )
             existing = session.exec(statement).first()
 
             alert_row = Alert(
+                master_node_id=master_node_id,
                 node_id=alert.node_id,
                 timestamp=alert.timestamp,
                 parameter=alert.parameter,
@@ -228,11 +551,18 @@ def sync_alerts(payload: AlertsSyncRequest, _: str = Depends(verify_token)) -> d
 
 
 @app.get('/alerts/latest')
-def latest_alerts(limit: int = Query(default=20, le=100)) -> list[dict[str, Any]]:
-    """Get latest alerts for all nodes"""
+def latest_alerts(
+    limit: int = Query(default=20, le=100),
+    claims: dict[str, Any] = Depends(verify_token),
+) -> list[dict[str, Any]]:
+    """Get latest alerts for current master node"""
+    master_node_id = claims['master_node_id']
     with get_session() as session:
         rows = session.exec(
-            select(Alert).order_by(Alert.timestamp.desc()).limit(limit)
+            select(Alert)
+            .where(Alert.master_node_id == master_node_id)
+            .order_by(Alert.timestamp.desc())
+            .limit(limit)
         ).all()
 
     return [
@@ -256,10 +586,12 @@ def alerts_history(
     start: str | None = Query(default=None),
     end: str | None = Query(default=None),
     limit: int = Query(default=100, le=500),
+    claims: dict[str, Any] = Depends(verify_token),
 ) -> list[dict[str, Any]]:
-    """Get alert history with optional filters"""
+    """Get alert history for current master node with optional filters"""
+    master_node_id = claims['master_node_id']
     with get_session() as session:
-        statement = select(Alert)
+        statement = select(Alert).where(Alert.master_node_id == master_node_id)
         if node_id:
             statement = statement.where(Alert.node_id == node_id)
         if start:
@@ -282,3 +614,159 @@ def alerts_history(
         }
         for row in rows
     ]
+
+
+@app.get('/nodes', response_model=list[NodeConfigResponse])
+def get_node_configs(claims: dict[str, Any] = Depends(verify_token)) -> list[NodeConfigResponse]:
+    """Fetch all configured sensor nodes and desired threshold target ranges for current master node"""
+    master_node_id = claims['master_node_id']
+    with get_session() as session:
+        rows = session.exec(
+            select(NodeConfig)
+            .where(NodeConfig.master_node_id == master_node_id)
+            .order_by(NodeConfig.node_id)
+        ).all()
+
+        results = []
+        for row in rows:
+            profile_val = row.custom_profile
+            if isinstance(profile_val, str) and profile_val.strip().startswith('{'):
+                try:
+                    profile_val = json.loads(profile_val)
+                except Exception:
+                    pass
+            results.append(
+                NodeConfigResponse(
+                    id=row.id,
+                    master_node_id=row.master_node_id,
+                    node_id=row.node_id,
+                    name=row.name,
+                    location=row.location,
+                    pond_type=row.pond_type,
+                    custom_profile=profile_val,
+                    updated_at=row.updated_at,
+                )
+            )
+        return results
+
+
+@app.post('/nodes/sync')
+def sync_node_configs(
+    payload: NodeConfigSyncRequest,
+    claims: dict[str, Any] = Depends(verify_token),
+) -> dict[str, Any]:
+    """Sync node configurations and desired threshold values from desktop app"""
+    master_node_id = claims['master_node_id']
+    if not payload.nodes:
+        return {'received': 0, 'stored': 0}
+
+    with get_session() as session:
+        saved = 0
+        now_iso = datetime.now(timezone.utc).isoformat()
+        for item in payload.nodes:
+            profile_str = (
+                json.dumps(item.custom_profile)
+                if isinstance(item.custom_profile, dict)
+                else item.custom_profile
+            )
+            statement = select(NodeConfig).where(
+                NodeConfig.master_node_id == master_node_id,
+                NodeConfig.node_id == item.node_id,
+            )
+            existing = session.exec(statement).first()
+            if existing is None:
+                row = NodeConfig(
+                    master_node_id=master_node_id,
+                    node_id=item.node_id,
+                    name=item.name,
+                    location=item.location,
+                    pond_type=item.pond_type or 'tilapia',
+                    custom_profile=profile_str,
+                    updated_at=now_iso,
+                )
+                session.add(row)
+                saved += 1
+            else:
+                if item.name is not None:
+                    existing.name = item.name
+                if item.location is not None:
+                    existing.location = item.location
+                if item.pond_type is not None:
+                    existing.pond_type = item.pond_type
+                if item.custom_profile is not None:
+                    existing.custom_profile = profile_str
+                existing.updated_at = now_iso
+                session.add(existing)
+                saved += 1
+        session.commit()
+    return {'received': len(payload.nodes), 'stored': saved}
+
+
+@app.patch('/nodes/{node_id}', response_model=NodeConfigResponse)
+def update_node_config(
+    node_id: str,
+    payload: NodeConfigUpdateRequest,
+    claims: dict[str, Any] = Depends(verify_token),
+) -> NodeConfigResponse:
+    """Update pond type and target thresholds for a specific node"""
+    master_node_id = claims['master_node_id']
+    with get_session() as session:
+        statement = select(NodeConfig).where(
+            NodeConfig.master_node_id == master_node_id,
+            NodeConfig.node_id == node_id,
+        )
+        node = session.exec(statement).first()
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        profile_str = (
+            json.dumps(payload.custom_profile)
+            if isinstance(payload.custom_profile, dict)
+            else payload.custom_profile
+        )
+
+        if node is None:
+            node = NodeConfig(
+                master_node_id=master_node_id,
+                node_id=node_id,
+                name=payload.name,
+                location=payload.location,
+                pond_type=payload.pond_type or 'tilapia',
+                custom_profile=profile_str,
+                updated_at=now_iso,
+            )
+            session.add(node)
+            session.commit()
+            session.refresh(node)
+        else:
+            if payload.name is not None:
+                node.name = payload.name.strip() or None
+            if payload.location is not None:
+                node.location = payload.location.strip() or None
+            if payload.pond_type is not None:
+                node.pond_type = payload.pond_type.strip() or 'tilapia'
+            if payload.custom_profile is not None:
+                node.custom_profile = profile_str
+            node.updated_at = now_iso
+            session.add(node)
+            session.commit()
+            session.refresh(node)
+
+        profile_val = node.custom_profile
+        if isinstance(profile_val, str) and profile_val.strip().startswith('{'):
+            try:
+                profile_val = json.loads(profile_val)
+            except Exception:
+                pass
+
+        return NodeConfigResponse(
+            id=node.id,
+            master_node_id=node.master_node_id,
+            node_id=node.node_id,
+            name=node.name,
+            location=node.location,
+            pond_type=node.pond_type,
+            custom_profile=profile_val,
+            updated_at=node.updated_at,
+        )
+
+

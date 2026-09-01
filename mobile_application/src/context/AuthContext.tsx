@@ -1,12 +1,18 @@
 import React, { createContext, useState, useEffect, ReactNode } from 'react';
 import { getStoredAuth, login as apiLogin, logout as apiLogout } from '../services/authService';
 
-type User = { username: string; role: string } | null;
+export type User = {
+  username: string;
+  nodeCode?: string;
+  displayName?: string;
+  role: string;
+  masterNodeId?: number;
+} | null;
 
 type AuthContextType = {
   user: User;
   token: string | null;
-  login: (username: string, password: string) => Promise<void>;
+  login: (nodeCode: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   loading: boolean;
 };
@@ -33,9 +39,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     })();
   }, []);
 
-  const handleLogin = async (username: string, password: string) => {
-    const res = await apiLogin(username, password);
-    setUser({ username: res.username, role: res.role });
+  const handleLogin = async (nodeCode: string, password: string) => {
+    const res = await apiLogin(nodeCode, password);
+    setUser({
+      username: res.nodeCode,
+      nodeCode: res.nodeCode,
+      displayName: res.displayName,
+      role: res.role,
+      masterNodeId: res.masterNodeId,
+    });
     setToken(res.token);
   };
 
@@ -51,3 +63,4 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     </AuthContext.Provider>
   );
 };
+

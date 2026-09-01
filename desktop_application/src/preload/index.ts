@@ -128,7 +128,23 @@ const api = {
     ipcRenderer.invoke('nodes:setCustomProfile', nodeId, profile),
   deleteNodeReadings: (nodeId: string): Promise<number> =>
     ipcRenderer.invoke('nodes:deleteReadings', nodeId),
-  deleteNode: (nodeId: string): Promise<number> => ipcRenderer.invoke('nodes:delete', nodeId)
+  deleteNode: (nodeId: string): Promise<number> => ipcRenderer.invoke('nodes:delete', nodeId),
+  cloudLogin: (nodeCode: string, password: string): Promise<any> =>
+    ipcRenderer.invoke('cloud:login', nodeCode, password),
+  cloudLogout: (): Promise<boolean> => ipcRenderer.invoke('cloud:logout'),
+  getCloudSession: (): Promise<any> => ipcRenderer.invoke('cloud:getSession'),
+  validateCloudSession: (): Promise<boolean> => ipcRenderer.invoke('cloud:validateSession'),
+  getCloudDirectory: (): Promise<Array<{ node_code: string; display_name: string }>> =>
+    ipcRenderer.invoke('cloud:getDirectory'),
+  getCloudProfile: (): Promise<any> => ipcRenderer.invoke('cloud:getProfile'),
+  updateCloudProfile: (payload: any): Promise<any> =>
+    ipcRenderer.invoke('cloud:updateProfile', payload),
+  changeCloudPassword: (currentPassword: string, newPassword: string): Promise<any> =>
+    ipcRenderer.invoke('cloud:changePassword', currentPassword, newPassword),
+  syncNodesCloud: (): Promise<{ received: number; stored: number }> =>
+    ipcRenderer.invoke('nodes:syncCloud'),
+  fetchNodesCloud: (): Promise<any[]> =>
+    ipcRenderer.invoke('nodes:fetchCloud')
 }
 
 // Use `contextBridge` APIs to expose Electron APIs to

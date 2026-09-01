@@ -10,7 +10,7 @@ import {
   type PondThresholdProfile
 } from '../../../shared/types'
 
-type SettingsTab = 'default' | 'connection' | 'ponds' | 'thresholds'
+type SettingsTab = 'default' | 'connection' | 'ponds' | 'thresholds' | 'cloud'
 
 type ThresholdTemplateDraft = {
   id?: number
@@ -58,6 +58,22 @@ function SettingsPage(): React.JSX.Element {
     name: 'Custom Farm',
     profile: { ...DEFAULT_POND_PROFILES.tilapia }
   })
+
+  // ── Cloud Sync state ─────────────────────────────────────────────────────
+  const [cloudProfile, setCloudProfile] = useState<any>(null)
+  const [cloudProfileLoading, setCloudProfileLoading] = useState(false)
+  const [cloudProfileFeedback, setCloudProfileFeedback] = useState<string | null>(null)
+  const [cloudProfileDraft, setCloudProfileDraft] = useState({ display_name: '', contact_name: '', contact_phone: '', site_location: '' })
+  const [readingsSyncLoading, setReadingsSyncLoading] = useState(false)
+  const [readingsSyncFeedback, setReadingsSyncFeedback] = useState<string | null>(null)
+  const [nodesSyncLoading, setNodesSyncLoading] = useState(false)
+  const [nodesFetchLoading, setNodesFetchLoading] = useState(false)
+  const [nodesSyncFeedback, setNodesSyncFeedback] = useState<string | null>(null)
+  const [cloudPwdCurrent, setCloudPwdCurrent] = useState('')
+  const [cloudPwdNew, setCloudPwdNew] = useState('')
+  const [cloudPwdConfirm, setCloudPwdConfirm] = useState('')
+  const [cloudPwdLoading, setCloudPwdLoading] = useState(false)
+  const [cloudPwdFeedback, setCloudPwdFeedback] = useState<string | null>(null)
 
   const selectedNode = knownNodes.find((node) => node.id === selectedNodeId) ?? null
 
@@ -175,6 +191,121 @@ function SettingsPage(): React.JSX.Element {
   async function handleSyncNow(): Promise<void> {
     const nextStatus = await window.api.syncCloudReadings()
     useReadingsStore.getState().setSyncStatus(nextStatus)
+  }
+
+  // ── Cloud Sync handlers ──────────────────────────────────────────────────
+  async function handleCloudReadingsSync(): Promise<void> {
+    setReadingsSyncLoading(true)
+    setReadingsSyncFeedback(null)
+    try {
+      const result = await window.api.syncCloudReadings()
+      useReadingsStore.getState().setSyncStatus(result)
+      setReadingsSyncFeedback(`✅ Synced ${result.synced ?? 0} reading(s) — ${result.pending ?? 0} pending.`)
+    } catch (err: any) {
+      setReadingsSyncFeedback(`❌ ${err.message ?? 'Sync failed'}`)
+    } finally {
+      setReadingsSyncLoading(false)
+    }
+  }
+
+  async function handleNodesSyncToCloud(): Promise<void> {
+    setNodesSyncLoading(true)
+    setNodesSyncFeedback(null)
+    try {
+      const result = await window.api.syncNodesCloud()
+      setNodesSyncFeedback(`✅ Uploaded ${result.received} node config(s) to cloud.`)
+    } catch (err: any) {
+      setNodesSyncFeedback(`❌ ${err.message ?? 'Upload failed'}`)
+    } finally {
+      setNodesSyncLoading(false)
+    }
+  }
+
+  async function handleNodesFetchFromCloud(): Promise<void> {
+    setNodesFetchLoading(true)
+    setNodesSyncFeedback(null)
+    try {
+      const cloudNodes = await window.api.fetchNodesCloud()
+      // Update local store with fetched configs
+      for (const cn of cloudNodes) {
+        useReadingsStore.getState().upsertKnownNode({
+          id: cn.node_id,
+          name: cn.name ?? undefined,
+          location: cn.location ?? undefined,
+          pond_type: cn.pond_type ?? 'tilapia',
+          custom_profile: cn.custom_profile ?? null,
+          status: 'offline',
+          last_seen: null
+        })
+      }
+      setNodesSyncFeedback(`✅ Pulled ${cloudNodes.length} node config(s) from cloud into local DB.`)
+    } catch (err: any) {
+      setNodesSyncFeedback(`❌ ${err.message ?? 'Fetch failed'}`)
+    } finally {
+      setNodesFetchLoading(false)
+    }
+  }
+
+  async function handleCloudProfileSync(): Promise<void> {
+    setCloudProfileLoading(true)
+    setCloudProfileFeedback(null)
+    try {
+      const profile = await window.api.getCloudProfile()
+      setCloudProfile(profile)
+      setCloudProfileDraft({
+        display_name: profile.display_name ?? '',
+        contact_name: profile.contact_name ?? '',
+        contact_phone: profile.contact_phone ?? '',
+        site_location: profile.site_location ?? ''
+      })
+      setCloudProfileFeedback('✅ Profile loaded from cloud.')
+    } catch (err: any) {
+      setCloudProfileFeedback(`❌ ${err.message ?? 'Could not load profile'}`)
+    } finally {
+      setCloudProfileLoading(false)
+    }
+  }
+
+  async function handleCloudProfileUpload(): Promise<void> {
+    setCloudProfileLoading(true)
+    setCloudProfileFeedback(null)
+    try {
+      await window.api.updateCloudProfile({
+        display_name: cloudProfileDraft.display_name.trim() || undefined,
+        contact_name: cloudProfileDraft.contact_name.trim() || null,
+        contact_phone: cloudProfileDraft.contact_phone.trim() || null,
+        site_location: cloudProfileDraft.site_location.trim() || null
+      })
+      setCloudProfileFeedback('✅ Profile uploaded to cloud successfully.')
+    } catch (err: any) {
+      setCloudProfileFeedback(`❌ ${err.message ?? 'Upload failed'}`)
+    } finally {
+      setCloudProfileLoading(false)
+    }
+  }
+
+  async function handleCloudPasswordUpload(): Promise<void> {
+    if (!cloudPwdCurrent || !cloudPwdNew) {
+      setCloudPwdFeedback('❌ Please fill in both current and new password.')
+      return
+    }
+    if (cloudPwdNew !== cloudPwdConfirm) {
+      setCloudPwdFeedback('❌ New password and confirmation do not match.')
+      return
+    }
+    setCloudPwdLoading(true)
+    setCloudPwdFeedback(null)
+    try {
+      await window.api.changeCloudPassword(cloudPwdCurrent, cloudPwdNew)
+      setCloudPwdCurrent('')
+      setCloudPwdNew('')
+      setCloudPwdConfirm('')
+      setCloudPwdFeedback('✅ Cloud password changed successfully.')
+    } catch (err: any) {
+      setCloudPwdFeedback(`❌ ${err.message ?? 'Password change failed'}`)
+    } finally {
+      setCloudPwdLoading(false)
+    }
   }
 
   async function handleAdminPasswordChange(): Promise<void> {
@@ -374,6 +505,27 @@ function SettingsPage(): React.JSX.Element {
         >
           Thresholds
         </button>
+        <button
+          className={`tab-btn${activeTab === 'cloud' ? ' active' : ''}`}
+          onClick={() => setActiveTab('cloud')}
+          style={{ position: 'relative' }}
+        >
+          ☁️ Cloud Sync
+          {syncStatus.pending > 0 && (
+            <span
+              style={{
+                position: 'absolute',
+                top: 4,
+                right: 4,
+                width: 8,
+                height: 8,
+                borderRadius: '50%',
+                background: '#f59e0b',
+                display: 'inline-block'
+              }}
+            />
+          )}
+        </button>
       </div>
 
       {activeTab === 'default' && (
@@ -491,9 +643,26 @@ function SettingsPage(): React.JSX.Element {
             </div>
           </div>
 
-          <div className="pond-actions">
+          <div className="pond-actions" style={{ marginTop: 16 }}>
             <button className="apply-btn" onClick={handleSaveConnectionSettings}>Save & Connect</button>
             <button className="apply-btn" onClick={handleSyncNow} disabled={!syncStatus.enabled}>Sync now</button>
+            <button
+              className="apply-btn"
+              style={{
+                backgroundColor: 'rgba(239, 68, 68, 0.2)',
+                borderColor: '#ef4444',
+                color: '#ef4444'
+              }}
+              onClick={async () => {
+                if (confirm('Are you sure you want to deactivate and sign this workstation out of its Master Node?')) {
+                  await window.api.cloudLogout()
+                  window.location.reload()
+                }
+              }}
+              title="Deactivate workstation and clear stored Master Node cloud credentials"
+            >
+              Sign out of this PC
+            </button>
           </div>
 
           {connectionFeedback && <p className="status success-text">{connectionFeedback}</p>}

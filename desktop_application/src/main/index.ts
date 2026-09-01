@@ -44,6 +44,13 @@ import {
   markAlertOutboxSynced,
   markAlertOutboxFailed
 } from './db'
+import {
+  saveCloudSession,
+  loadCloudSession,
+  clearCloudSession,
+  validateCloudSession,
+  type CloudSessionData
+} from './cloudSession'
 import { MasterNodeClient } from './masterNodeClient'
 import { DecisionEngine } from './decisionEngine'
 import { scanNetworks, connectToNetwork, getCurrentConnection } from './wifiManager'
@@ -53,46 +60,14 @@ import type { Score } from '../shared/types'
 const OFFLINE_CHECK_INTERVAL_MS = 30_000
 const OFFLINE_THRESHOLD_MS = 5 * 60_000
 const CLOUD_SYNC_INTERVAL_MS = 2 * 60_000
-const CLOUD_ADMIN_USERNAME = 'Admin'
-const CLOUD_ADMIN_PASSWORD = 'Admin123'
 
 let mainWindow: BrowserWindow
 const masterNodeClient = new MasterNodeClient()
 const decisionEngine = new DecisionEngine()
 
 async function getCloudAuthToken(): Promise<string | null> {
-  const baseUrl = getSettingOptional('cloud_sync_url')?.trim()
-  if (!baseUrl) {
-    return null
-  }
-
-  const loginUrl = new URL('/auth/login', baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`).toString()
-
-  try {
-    const response = await fetch(loginUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        username: CLOUD_ADMIN_USERNAME,
-        password: CLOUD_ADMIN_PASSWORD
-      })
-    })
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`)
-    }
-
-    const payload = (await response.json()) as { access_token?: string }
-    if (!payload.access_token) {
-      throw new Error('Cloud login did not return an access token')
-    }
-
-    return payload.access_token
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown cloud login error'
-    console.error('[main] cloud login failed:', message)
-    return null
-  }
+  const session = loadCloudSession()
+  return session?.token ?? null
 }
 
 async function syncQueuedReadings(): Promise<void> {
@@ -112,8 +87,9 @@ async function syncQueuedReadings(): Promise<void> {
 
   const accessToken = await getCloudAuthToken()
   if (!accessToken) {
-    throw new Error('Unable to authenticate with the cloud backend. Check the deployed backend URL and admin credentials.')
+    throw new Error('Not authenticated to cloud backend. Please activate Master Node cloud session.')
   }
+
 
   try {
     // Sync readings
@@ -352,6 +328,125 @@ app.whenReady().then(() => {
     return getCloudSyncStatus()
   })
 
+  ipcMain.handle('cloud:login', async (_event, nodeCode: string, password: string) => {
+    const baseUrl = getSettingOptional('cloud_sync_url')?.trim() || 'http://localhost:8000'
+    const loginUrl = new URL('/auth/login', baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`).toString()
+    const response = await fetch(loginUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ node_code: nodeCode, password })
+    })
+
+    if (!response.ok) {
+      const errData = (await response.json().catch(() => ({}))) as { detail?: string }
+      throw new Error(errData.detail || `Login failed (HTTP ${response.status})`)
+    }
+
+    const data = (await response.json()) as {
+      access_token?: string
+      token?: string
+      master_node_id: number
+      node_code: string
+      display_name: string
+      role: string
+    }
+
+    const session: CloudSessionData = {
+      token: data.access_token || data.token || '',
+      masterNodeId: data.master_node_id,
+      nodeCode: data.node_code,
+      displayName: data.display_name,
+      role: data.role,
+      savedAt: new Date().toISOString()
+    }
+
+    saveCloudSession(session)
+    return session
+  })
+
+  ipcMain.handle('cloud:logout', () => {
+    clearCloudSession()
+    return true
+  })
+
+  ipcMain.handle('cloud:getSession', () => loadCloudSession())
+
+  ipcMain.handle('cloud:validateSession', async () => {
+    const session = loadCloudSession()
+    if (!session) return false
+    const baseUrl = getSettingOptional('cloud_sync_url')?.trim() || 'http://localhost:8000'
+    return await validateCloudSession(baseUrl, session.token)
+  })
+
+  ipcMain.handle('cloud:getDirectory', async () => {
+    const baseUrl = getSettingOptional('cloud_sync_url')?.trim() || 'http://localhost:8000'
+    const dirUrl = new URL('/master-nodes/directory', baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`).toString()
+    const response = await fetch(dirUrl)
+    if (!response.ok) {
+      throw new Error(`Failed to fetch directory: HTTP ${response.status}`)
+    }
+    return await response.json()
+  })
+
+  ipcMain.handle('cloud:getProfile', async () => {
+    const session = loadCloudSession()
+    if (!session) throw new Error('Not authenticated to cloud backend')
+    const baseUrl = getSettingOptional('cloud_sync_url')?.trim() || 'http://localhost:8000'
+    const profileUrl = new URL('/master-nodes/me', baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`).toString()
+    const response = await fetch(profileUrl, {
+      headers: { Authorization: `Bearer ${session.token}` }
+    })
+    if (!response.ok) {
+      throw new Error(`Failed to fetch profile: HTTP ${response.status}`)
+    }
+    return await response.json()
+  })
+
+  ipcMain.handle('cloud:updateProfile', async (_event, payload: any) => {
+    const session = loadCloudSession()
+    if (!session) throw new Error('Not authenticated to cloud backend')
+    const baseUrl = getSettingOptional('cloud_sync_url')?.trim() || 'http://localhost:8000'
+    const profileUrl = new URL('/master-nodes/me', baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`).toString()
+    const response = await fetch(profileUrl, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${session.token}`
+      },
+      body: JSON.stringify(payload)
+    })
+    if (!response.ok) {
+      const err = (await response.json().catch(() => ({}))) as { detail?: string }
+      throw new Error(err.detail || `Failed to update profile: HTTP ${response.status}`)
+    }
+    const updated = (await response.json()) as { display_name?: string }
+    if (updated.display_name) {
+      saveCloudSession({ ...session, displayName: updated.display_name })
+    }
+    return updated
+  })
+
+  ipcMain.handle('cloud:changePassword', async (_event, currentPassword: string, newPassword: string) => {
+    const session = loadCloudSession()
+    if (!session) throw new Error('Not authenticated to cloud backend')
+    const baseUrl = getSettingOptional('cloud_sync_url')?.trim() || 'http://localhost:8000'
+    const pwdUrl = new URL('/auth/change-password', baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`).toString()
+    const response = await fetch(pwdUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${session.token}`
+      },
+      body: JSON.stringify({ current_password: currentPassword, new_password: newPassword })
+    })
+    if (!response.ok) {
+      const err = (await response.json().catch(() => ({}))) as { detail?: string }
+      throw new Error(err.detail || `Password change failed: HTTP ${response.status}`)
+    }
+    return await response.json()
+  })
+
+
   ipcMain.handle('nodes:setPondType', (_event, nodeId: string, pondType: string) =>
     setNodePondType(nodeId, pondType)
   )
@@ -362,6 +457,62 @@ app.whenReady().then(() => {
   )
   ipcMain.handle('nodes:deleteReadings', (_event, nodeId: string) => deleteNodeReadings(nodeId))
   ipcMain.handle('nodes:delete', (_event, nodeId: string) => deleteNode(nodeId))
+
+  ipcMain.handle('nodes:syncCloud', async () => {
+    const session = loadCloudSession()
+    if (!session) throw new Error('Not authenticated to cloud backend')
+    const baseUrl = getSettingOptional('cloud_sync_url')?.trim() || 'http://localhost:8000'
+    const syncUrl = new URL('/nodes/sync', baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`).toString()
+    const allNodes = getAllNodes()
+    const payload = allNodes.map((n: any) => ({
+      node_id: n.id,
+      name: n.name ?? null,
+      location: n.location ?? null,
+      pond_type: getNodePondType(n.id) ?? 'tilapia',
+      custom_profile: getNodeCustomProfile(n.id) ?? null
+    }))
+    const response = await fetch(syncUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${session.token}`
+      },
+      body: JSON.stringify({ nodes: payload })
+    })
+    if (!response.ok) {
+      const err = (await response.json().catch(() => ({}))) as { detail?: string }
+      throw new Error(err.detail || `Failed to sync nodes: HTTP ${response.status}`)
+    }
+    return await response.json()
+  })
+
+  ipcMain.handle('nodes:fetchCloud', async () => {
+    const session = loadCloudSession()
+    if (!session) throw new Error('Not authenticated to cloud backend')
+    const baseUrl = getSettingOptional('cloud_sync_url')?.trim() || 'http://localhost:8000'
+    const nodesUrl = new URL('/nodes', baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`).toString()
+    const response = await fetch(nodesUrl, {
+      headers: { Authorization: `Bearer ${session.token}` }
+    })
+    if (!response.ok) {
+      throw new Error(`Failed to fetch nodes from cloud: HTTP ${response.status}`)
+    }
+    const cloudNodes = (await response.json()) as Array<{
+      node_id: string
+      name: string | null
+      location: string | null
+      pond_type: string
+      custom_profile: any
+    }>
+    for (const cn of cloudNodes) {
+      upsertNodeStub(cn.node_id)
+      if (cn.pond_type) setNodePondType(cn.node_id, cn.pond_type)
+      if (cn.custom_profile) setNodeCustomProfile(cn.node_id, cn.custom_profile)
+    }
+    return cloudNodes
+  })
+
+
 
   const savedWifiSsid = getSettingOptional('wifi_ssid')
   const savedWifiPassword = getSettingOptional('wifi_password')

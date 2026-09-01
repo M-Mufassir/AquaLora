@@ -12,20 +12,34 @@ import {
 } from 'react-native';
 import { AuthContext } from '../context/AuthContext';
 import { apiService, APIError } from '../services/apiService';
-import { Reading } from '../shared/types';
+import { getNodes } from '../services/authService';
+import { Reading, NodeConfig, PondThresholdProfile, getEffectiveProfile } from '../shared/types';
 import { colors, borderRadius, spacing, typography, shadows } from '../theme';
 import { Gauge, StatusBar, SkeletonLoader, Button } from '../components';
-
 import { saveCache, getCache, CACHE_KEYS } from '../services/cacheService';
 
 export const DashboardScreen = () => {
-  const { loading: authLoading } = useContext(AuthContext);
+  const { loading: authLoading, user } = useContext(AuthContext);
   const [readings, setReadings] = useState<Reading[]>([]);
+  const [nodeConfigs, setNodeConfigs] = useState<Record<string, NodeConfig>>({});
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isOfflineMode, setIsOfflineMode] = useState(false);
+
+  const fetchNodeConfigs = useCallback(async () => {
+    try {
+      const configs = await getNodes();
+      const configMap: Record<string, NodeConfig> = {};
+      for (const c of configs) {
+        configMap[c.node_id] = c;
+      }
+      setNodeConfigs(configMap);
+    } catch (err) {
+      console.warn('[Dashboard] Could not fetch node configs:', err);
+    }
+  }, []);
 
   const fetchReadings = useCallback(async (isRefresh = false) => {
     if (!isRefresh) setLoading(true);
@@ -42,7 +56,6 @@ export const DashboardScreen = () => {
       setIsOfflineMode(false);
     } catch (err) {
       const apiErr = err as APIError;
-      // Attempt cache retrieval
       const cached = await getCache<Reading[]>(CACHE_KEYS.READINGS);
       if (cached && cached.data.length > 0) {
         setReadings(cached.data);
@@ -60,44 +73,52 @@ export const DashboardScreen = () => {
 
   useEffect(() => {
     if (!authLoading) {
+      fetchNodeConfigs();
       fetchReadings();
     }
-  }, [authLoading, fetchReadings]);
+  }, [authLoading]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
-    await fetchReadings(true);
+    await Promise.all([fetchNodeConfigs(), fetchReadings(true)]);
   };
 
   const currentReading = readings.find(r => r.node_id === selectedNodeId) || readings[0];
+  const currentConfig = selectedNodeId ? nodeConfigs[selectedNodeId] : null;
+  const profile: PondThresholdProfile = getEffectiveProfile(currentConfig);
 
-  // Fish Health Index (FHI) calculation algorithm (0 - 100)
-  const calculateFHI = (r?: Reading) => {
+  // Dynamic FHI calculation using the active node's pond species profile
+  const calculateFHI = (r?: Reading, p?: PondThresholdProfile) => {
     if (!r) return { score: 0, status: 'Unknown', color: colors.textMuted };
-
+    const thresholds = p || profile;
     let score = 100;
-    // Temp penalty: ideal 22 - 28
-    if (r.temperature < 20 || r.temperature > 30) score -= 15;
-    if (r.temperature < 18 || r.temperature > 32) score -= 20;
 
-    // Turbidity penalty: ideal < 3
-    if (r.turbidity > 3) score -= 15;
-    if (r.turbidity > 5) score -= 25;
+    const tempRange = thresholds.temperature.max - thresholds.temperature.min;
+    const tempCenter = (thresholds.temperature.max + thresholds.temperature.min) / 2;
+    const tempDeviation = Math.abs(r.temperature - tempCenter) / (tempRange / 2);
+    if (tempDeviation > 0.5) score -= 15;
+    if (tempDeviation > 0.9) score -= 20;
 
-    // TDS penalty: ideal 300 - 600
-    if (r.tds < 200 || r.tds > 800) score -= 15;
+    const turbMax = thresholds.turbidity.max;
+    if (r.turbidity > turbMax * 0.6) score -= 15;
+    if (r.turbidity > turbMax) score -= 25;
 
-    // pH penalty: ideal 6.8 - 7.8
-    if (r.ph < 6.5 || r.ph > 8.5) score -= 25;
+    const tdsMin = thresholds.tds.min;
+    const tdsMax = thresholds.tds.max;
+    if (r.tds < tdsMin || r.tds > tdsMax) score -= 15;
+
+    const phMin = thresholds.ph.min;
+    const phMax = thresholds.ph.max;
+    if (r.ph < phMin || r.ph > phMax) score -= 25;
 
     score = Math.max(0, Math.min(100, score));
-
     if (score >= 80) return { score, status: 'Optimal Health', color: colors.success };
     if (score >= 60) return { score, status: 'Moderate Stress', color: colors.warning };
     return { score, status: 'High Risk Condition', color: colors.error };
   };
 
-  const fhi = calculateFHI(currentReading);
+  const fhi = calculateFHI(currentReading, profile);
+
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -105,11 +126,22 @@ export const DashboardScreen = () => {
       <View style={styles.header}>
         <View>
           <Text style={styles.appTitle}>AquaLora Dashboard</Text>
-          <Text style={styles.subtitle}>Telemetry Monitor</Text>
+          <Text style={styles.subtitle}>
+            {user?.displayName || user?.nodeCode || 'Telemetry Monitor'}
+          </Text>
         </View>
-        <TouchableOpacity style={styles.refreshIconBtn} onPress={() => fetchReadings()}>
-          <Text style={styles.refreshIconText}>🔄</Text>
-        </TouchableOpacity>
+        <View style={styles.headerRight}>
+          {currentConfig?.pond_type ? (
+            <View style={styles.speciesBadge}>
+              <Text style={styles.speciesBadgeText}>
+                🐟 {currentConfig.pond_type.charAt(0).toUpperCase() + currentConfig.pond_type.slice(1)}
+              </Text>
+            </View>
+          ) : null}
+          <TouchableOpacity style={styles.refreshIconBtn} onPress={handleRefresh}>
+            <Text style={styles.refreshIconText}>🔄</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Top Connection Status Bar */}
@@ -194,10 +226,10 @@ export const DashboardScreen = () => {
               title="Water Temperature"
               value={currentReading.temperature}
               unit="°C"
-              min={10}
-              max={40}
-              safeMin={18}
-              safeMax={32}
+              min={Math.max(0, profile.temperature.min - 10)}
+              max={profile.temperature.max + 10}
+              safeMin={profile.temperature.min}
+              safeMax={profile.temperature.max}
               icon="🌡️"
               precision={1}
             />
@@ -207,9 +239,9 @@ export const DashboardScreen = () => {
               value={currentReading.turbidity}
               unit="NTU"
               min={0}
-              max={10}
-              safeMin={0}
-              safeMax={5}
+              max={Math.max(10, profile.turbidity.max + 5)}
+              safeMin={profile.turbidity.min}
+              safeMax={profile.turbidity.max}
               icon="💧"
               precision={2}
             />
@@ -219,9 +251,9 @@ export const DashboardScreen = () => {
               value={currentReading.tds}
               unit="ppm"
               min={0}
-              max={1200}
-              safeMin={200}
-              safeMax={800}
+              max={Math.max(1200, profile.tds.max + 200)}
+              safeMin={profile.tds.min}
+              safeMax={profile.tds.max}
               icon="🧪"
               precision={0}
             />
@@ -232,8 +264,8 @@ export const DashboardScreen = () => {
               unit="pH"
               min={4}
               max={10}
-              safeMin={6.5}
-              safeMax={8.5}
+              safeMin={profile.ph.min}
+              safeMax={profile.ph.max}
               icon="⚖️"
               precision={1}
             />
@@ -290,9 +322,28 @@ const styles = StyleSheet.create({
   refreshIconText: {
     fontSize: 20,
   },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  speciesBadge: {
+    backgroundColor: colors.primaryLight,
+    borderRadius: borderRadius.pill,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 3,
+    borderWidth: 1,
+    borderColor: colors.primary,
+  },
+  speciesBadgeText: {
+    ...typography.caption,
+    fontWeight: '700',
+    color: colors.primary,
+  },
   scrollContent: {
     padding: spacing.md,
   },
+
   skeletonContainer: {
     marginTop: spacing.sm,
   },

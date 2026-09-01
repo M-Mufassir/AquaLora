@@ -552,3 +552,8 @@ export function setSetting(key: string, value: string): void {
   ).run(key, value)
 }
 
+export function deleteSetting(key: string): void {
+  db.prepare('DELETE FROM settings WHERE key = ?').run(key)
+}
+
+

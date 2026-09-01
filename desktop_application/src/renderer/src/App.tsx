@@ -2,12 +2,14 @@ import { useEffect, useRef, useState } from 'react'
 import { HashRouter, Routes, Route, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useReadingsStore } from './store/useReadingsStore'
 import LoginScreen from './components/LoginScreen'
+import CloudActivationScreen from './components/CloudActivationScreen'
 import ThemeToggle from './components/ThemeToggle'
 import CriticalAlertOverlay from './components/CriticalAlertOverlay'
 import HomePage from './pages/HomePage'
 import LogsPage from './pages/LogsPage'
 import SettingsPage from './pages/SettingsPage'
 import ConnectDevicePage from './pages/ConnectDevicePage'
+import MasterNodeProfilePage from './pages/MasterNodeProfilePage'
 
 // Sends a freshly logged-in user with zero paired nodes straight to the
 // pairing wizard instead of an empty Home page — but only once per app
@@ -45,12 +47,29 @@ function App(): React.JSX.Element {
   const setSettings = useReadingsStore((s) => s.setSettings)
   const setSyncStatus = useReadingsStore((s) => s.setSyncStatus)
   const [nodesLoaded, setNodesLoaded] = useState(false)
+  const [cloudSessionChecked, setCloudSessionChecked] = useState(false)
+  const [cloudSession, setCloudSession] = useState<any | null>(null)
 
   useEffect(() => {
     window.api.getSettings().then((settings) => {
       setSettings(settings)
       document.documentElement.dataset.theme = settings.theme
     })
+
+    window.api.getCloudSession().then((session) => {
+      setCloudSession(session)
+      setCloudSessionChecked(true)
+
+      // Silent background validation when online
+      if (session) {
+        window.api.validateCloudSession().then((valid) => {
+          if (!valid) {
+            console.warn('[App] Stored cloud session is no longer valid on backend.')
+          }
+        })
+      }
+    })
+
     window.api.getSyncStatus().then(setSyncStatus)
     const unsubscribe = window.api.onSyncStatus((status) => setSyncStatus(status))
     return () => unsubscribe()
@@ -96,6 +115,20 @@ function App(): React.JSX.Element {
 
   const syncStatus = useReadingsStore((s) => s.syncStatus)
 
+  if (!cloudSessionChecked) {
+    return (
+      <div className="login-screen">
+        <p style={{ color: 'var(--ev-c-text-2)' }}>Initializing AquaLoRa…</p>
+      </div>
+    )
+  }
+
+  // If this workstation has not been activated with a Master Node identity yet, show activation
+  if (!cloudSession) {
+    return <CloudActivationScreen onActivated={(session) => setCloudSession(session)} />
+  }
+
+  // Everyday local operator login
   if (!currentUser) {
     return <LoginScreen onLogin={(username, role) => setCurrentUser({ username, role })} />
   }
@@ -111,6 +144,12 @@ function App(): React.JSX.Element {
           </NavLink>
           <NavLink to="/logs" className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
             Logs
+          </NavLink>
+          <NavLink
+            to="/profile"
+            className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
+          >
+            Node Profile
           </NavLink>
           <NavLink
             to="/settings"
@@ -172,6 +211,7 @@ function App(): React.JSX.Element {
             <Route path="/" element={<HomePage />} />
             <Route path="/logs" element={<LogsPage />} />
             <Route path="/logs/:nodeId" element={<LogsPage />} />
+            <Route path="/profile" element={<MasterNodeProfilePage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/connect" element={<ConnectDevicePage />} />
           </Routes>
@@ -184,3 +224,4 @@ function App(): React.JSX.Element {
 }
 
 export default App
+

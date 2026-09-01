@@ -1,111 +1,69 @@
-# AquaLora Mobile – Quick Start Guide
+# AquaLoRa Mobile Application
 
-## Overview
-
-The **AquaLoRa Mobile App** is a React Native (Expo) client that connects directly to the AquaLoRa backend API. It is a **completely independent system** from the desktop application — both authenticate separately against the same backend and read data from the same PostgreSQL database.
-
-**Architecture**:
-- **Desktop app**: Works offline with local SQLite, syncs to backend when online
-- **Mobile app**: Reads from backend API (no local database)
-- **Backend API**: Single source of truth for all cloud data
-- **Credentials**: Configured on backend; both apps use same credentials
-
-## Prerequisites
-- Node.js **≥ 20** (download from https://nodejs.org)
-- **npm** or **yarn** (commands below use npm)
-- **Expo CLI** (global install): `npm install -g expo-cli`
-- Android Studio (for Android emulator) **OR** Expo Go app on a physical device
-- **Backend must be running** — either locally (`http://localhost:8000`) or on Railway
-
-## Folder structure
-```
-desktop_application/
-│   ... (existing desktop code)
-│
-├─ mobile_app/               # Expo project (mobile UI)
-│   ├─ package.json
-│   ├─ app.json
-│   ├─ src/
-│   │   ├─ App.tsx
-│   │   ├─ navigation/index.tsx
-│   │   └─ screens/LoginScreen.tsx
-│   └─ README.md   <-- you are reading this!
-│
-└─ mobile_auth_server/       # Tiny Express auth service
-    ├─ package.json
-    └─ src/
-        └─ db.ts
-        └─ server.js
-```
-
-## Setup & Run
-### 1. Install dependencies for the auth server
-```bash
-cd desktop_application/mobile_auth_server
-npm install
-```
-### 2. Start the auth server
-```bash
-npm start
-# The server will listen on http://localhost:3001
-```
-You should see a log line like:
-```
-[auth] Server listening on http://localhost:3001
-```
-### 3. Install dependencies for the mobile app
-```bash
-cd ../mobile_app
-npm install
-```
-### 4. Run the mobile app with Expo
-```bash
-npm run start   # opens the Expo dev tools in a browser
-```
-- On the Expo dev tools page click **Run on Android device/emulator** (or iOS) to launch the app.
-- If you are using a physical device, scan the QR code with the **Expo Go** app.
-
-### 5. Test the login flow
-1. The app starts on the **Login** screen.
-2. Enter the admin credentials (Admin / Admin123) and press **Login**.
-3. On success, you are navigated to a placeholder Home screen.
-4. Wrong credentials show an alert “Login failed”.
-
-## Credentials & User Management
-
-Credentials are configured on the backend API (in `.env` or Railway dashboard):
-
-```env
-ADMIN_USERNAME=Admin
-ADMIN_PASSWORD=Admin123
-JWT_SECRET=your-secret-key
-```
-
-Both desktop and mobile apps authenticate against these same backend credentials.
-
-**Future**: When the backend supports per-user authentication, both apps will auto-support it.
-
-## Troubleshooting
-
-| Problem | Solution |
-|---------|----------|
-| **"Cannot reach backend"** | Verify backend is running, check `API_BASE_URL` in `config.ts` |
-| **"Login failed" (401)** | Check credentials against backend config (default: Admin/Admin123) |
-| **"Android emulator can't reach localhost"** | Use `http://10.0.2.2:8000` instead of `http://localhost:8000` |
-| **CORS errors** | Backend should enable CORS for mobile client IP |
-| **Token expired** | Implement token refresh in future iterations |
-
-## Next Steps
-
-1. **Dashboard readings**: Fetch from backend `/readings/latest`
-2. **History view**: Fetch from backend `/readings/history` with time filters
-3. **Alert display**: Once backend adds `/alerts/latest`, display alerts
-4. **Persistent login**: Use Async Storage or Secure Store to save token
-5. **Push notifications**: Set up Firebase Cloud Messaging (FCM) for alerts
-6. **Real-time updates**: Implement WebSocket or polling for live readings
+The **AquaLoRa Mobile App** is a cross-platform React Native / Expo application that connects to the multi-tenant AquaLoRa cloud backend. It provides aquaculture farm owners and managers with remote telemetry monitoring, threshold alerts, and facility profile management.
 
 ---
 
-**Related docs**:
-- [Backend/README.md](../Backend/README.md) — API setup & deployment
-- [Main README.md](../README.md) — System architecture overview
+## 1. Features
+
+- **Multi-Tenant Master Node Authentication**: Select facility Master Node from a dynamically fetched cloud directory or enter custom node code with encrypted password login.
+- **Persistent Secure Session**: Uses `expo-secure-store` to keep sessions safely encrypted at rest.
+- **Real-Time Live Dashboard**: Displays water quality gauges (Temperature, Turbidity, TDS, pH), Fish Health Index (FHI), and connection metrics scoped to the active facility.
+- **Historical Trends & Analytics**: Time-filtered charts and telemetry logs.
+- **Threshold Alerts**: Instant viewing of warning and critical pond quality alerts.
+- **Facility Profile Manager**: View and edit pond metadata (farm name, contact person, phone, site location, species) and change Master Node password.
+
+---
+
+## 2. Setup & Execution
+
+### Prerequisites
+- Node.js ≥ 20
+- Expo CLI: `npm install -g expo-cli`
+- Physical device with Expo Go **OR** Android Studio / iOS Simulator
+- Backend API running (locally or on Railway)
+
+### Installation
+```bash
+cd mobile_application
+npm install
+```
+
+### Configuration
+Edit `src/config.ts` if needed:
+```typescript
+export const API_BASE_URL = 'http://localhost:8000'; // Or your Railway production endpoint
+```
+*(For Android emulator accessing host localhost, use `http://10.0.2.2:8000`)*
+
+### Start App
+```bash
+npm run start
+```
+- Press `a` for Android emulator, `i` for iOS simulator, or scan the QR code with Expo Go.
+
+---
+
+## 3. Project Structure
+
+```
+src/
+├── components/          # Reusable UI components (Button, Modal, Card, etc.)
+├── config.ts            # API base URL configuration
+├── context/
+│   └── AuthContext.tsx  # Multi-tenant auth state & session provider
+├── navigation/
+│   └── index.tsx        # Bottom tab & stack navigators
+├── screens/
+│   ├── LoginScreen.tsx               # Master Node picker & login
+│   ├── DashboardScreen.tsx           # Real-time pond gauges & FHI
+│   ├── HistoryScreen.tsx             # Telemetry charts & history
+│   ├── AlertsScreen.tsx              # System alerts & warnings
+│   ├── MasterNodeProfileScreen.tsx   # Facility metadata & password change
+│   └── SettingsScreen.tsx            # Connection tests & account sign-out
+├── services/
+│   ├── apiService.ts    # Axios client with bearer token interceptor
+│   ├── authService.ts   # Multi-tenant login, directory & profile APIs
+│   └── cacheService.ts  # Local caching helper
+└── theme/               # Color palette, spacing, typography & shadows
+```

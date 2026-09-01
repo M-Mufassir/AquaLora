@@ -2,12 +2,11 @@ import WebSocket from 'ws'
 import type { Reading, SetIntervalCommand, NodeListMessage } from '../shared/types'
 import { encryptMessage, decryptMessage } from './secureChannel'
 
-// Default target in development, before a device has been paired via the
-// Connect Device wizard (see README "Real MCU pairing"). Once paired, main
-// calls connect() again with the real Master Node's URL (its WiFi AP
-// gateway, e.g. ws://192.168.4.1:8081) and that choice is persisted to the
-// settings table so restarts reconnect straight to it.
-const DEFAULT_MOCK_URL = 'ws://localhost:8081'
+// Default ESP32 Master Node WebSocket endpoint (AP mode).
+// Once paired via the Connect Device wizard, main calls connect() again
+// with the node's WiFi AP gateway (ws://192.168.4.1:8081) or LAN IP
+// (e.g. ws://192.168.1.50:8081), and the choice is persisted in settings.
+const DEFAULT_ESP32_URL = 'ws://192.168.4.1:8081'
 const RECONNECT_DELAY_MS = 3000
 
 export type ConnectionStatus = 'connected' | 'reconnecting'
@@ -20,18 +19,9 @@ export class MasterNodeClient {
   private onNodeListCallback: ((nodes: NodeListMessage['nodes']) => void) | null = null
   private onStatusChangeCallback: ((status: ConnectionStatus) => void) | null = null
 
-  // encryptionKey is present for a real MCU paired with a WiFi password
-  // (AES-256-GCM, see secureChannel.ts) and absent for the dev mock, which
-  // speaks plain JSON — mirroring the two states the wizard can leave a
-  // pairing in.
-  connect(url: string = DEFAULT_MOCK_URL, encryptionKey?: Buffer): void {
-    // If we are connecting to a local mock server, ignore any stored encryption key.
-    if (url.includes('localhost') || url.includes('127.0.0.1')) {
-      encryptionKey = undefined;
-    }
-    // Tear down any existing connection first — connect() can now be called
-    // again mid-session when the user re-pairs to a different Master Node
-    // from the Connect Device wizard, which never happened before.
+  connect(url: string = DEFAULT_ESP32_URL, encryptionKey?: Buffer): void {
+    // Tear down any existing connection first — connect() can be called again
+    // when the user re-pairs to a different Master Node via the Connect Device wizard.
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer)
       this.reconnectTimer = null
@@ -44,6 +34,7 @@ export class MasterNodeClient {
     this.encryptionKey = encryptionKey ?? null
 
     this.socket = new WebSocket(url)
+
 
     this.socket.on('open', () => {
       console.log(

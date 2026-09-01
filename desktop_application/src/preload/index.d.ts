@@ -62,6 +62,58 @@ interface AquaLoraApi {
   setNodeCustomProfile: (nodeId: string, profile: any) => Promise<NodeRow>
   deleteNodeReadings: (nodeId: string) => Promise<number>
   deleteNode: (nodeId: string) => Promise<number>
+  cloudLogin: (nodeCode: string, password: string) => Promise<{
+    token: string
+    masterNodeId: number
+    nodeCode: string
+    displayName: string
+    role: string
+    savedAt: string
+  }>
+  cloudLogout: () => Promise<boolean>
+  getCloudSession: () => Promise<{
+    token: string
+    masterNodeId: number
+    nodeCode: string
+    displayName: string
+    role: string
+    savedAt: string
+  } | null>
+  validateCloudSession: () => Promise<boolean>
+  getCloudDirectory: () => Promise<Array<{ node_code: string; display_name: string }>>
+  getCloudProfile: () => Promise<{
+    id: number
+    node_code: string
+    display_name: string
+    contact_name?: string | null
+    contact_phone?: string | null
+    site_location?: string | null
+    pond_type?: string | null
+    installed_at?: string | null
+    role: string
+    status: string
+    created_at?: string | null
+    updated_at?: string | null
+  }>
+  updateCloudProfile: (payload: {
+    display_name?: string
+    contact_name?: string | null
+    contact_phone?: string | null
+    site_location?: string | null
+    pond_type?: string | null
+  }) => Promise<any>
+  changeCloudPassword: (currentPassword: string, newPassword: string) => Promise<{ message: string }>
+  syncNodesCloud: () => Promise<{ received: number; stored: number }>
+  fetchNodesCloud: () => Promise<Array<{
+    id: number
+    master_node_id: number
+    node_id: string
+    name: string | null
+    location: string | null
+    pond_type: string
+    custom_profile: any
+    updated_at: string | null
+  }>>
 }
 
 declare global {

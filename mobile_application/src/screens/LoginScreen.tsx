@@ -1,5 +1,5 @@
 // src/screens/LoginScreen.tsx
-import React, { useState, useContext } from 'react';
+import React, { useState, useEffect, useContext } from 'react';
 import {
   View,
   Text,
@@ -9,23 +9,64 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  ActivityIndicator,
+  Modal,
+  FlatList,
+  ImageBackground,
+  Image,
 } from 'react-native';
 import { AuthContext } from '../context/AuthContext';
+import { getDirectory, DirectoryNode } from '../services/authService';
 import { colors, borderRadius, spacing, typography, shadows } from '../theme';
 import { Button } from '../components';
 
+// Real branding assets from assets folder
+const splashBg = require('../../assets/splash.jpg');
+const appIcon = require('../../assets/icon.png');
+
 export const LoginScreen = () => {
-  const [username, setUsername] = useState('Admin');
-  const [password, setPassword] = useState('Admin123');
+  const [nodes, setNodes] = useState<DirectoryNode[]>([]);
+  const [selectedNode, setSelectedNode] = useState<DirectoryNode | null>(null);
+  const [manualCode, setManualCode] = useState('');
+  const [isManual, setIsManual] = useState(false);
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [loadingDirectory, setLoadingDirectory] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [modalVisible, setModalVisible] = useState(false);
 
   const { login } = useContext(AuthContext);
 
+  const fetchDirectoryList = async () => {
+    setLoadingDirectory(true);
+    try {
+      const list = await getDirectory();
+      setNodes(list);
+      if (list.length > 0 && !selectedNode) {
+        setSelectedNode(list[0]);
+      }
+    } catch (err) {
+      console.warn('[LoginScreen] Could not fetch node directory:', err);
+      setIsManual(true);
+    } finally {
+      setLoadingDirectory(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchDirectoryList();
+  }, []);
+
   const handleLogin = async () => {
-    if (!username.trim() || !password.trim()) {
-      setErrorMessage('Please enter both username and password.');
+    const targetCode = isManual ? manualCode.trim() : selectedNode?.node_code?.trim();
+
+    if (!targetCode) {
+      setErrorMessage('Please select or enter a Master Node code.');
+      return;
+    }
+    if (!password.trim()) {
+      setErrorMessage('Please enter the Master Node password.');
       return;
     }
 
@@ -33,105 +74,181 @@ export const LoginScreen = () => {
     setErrorMessage(null);
 
     try {
-      await login(username.trim(), password.trim());
+      await login(targetCode, password.trim());
     } catch (err: any) {
-      setErrorMessage(err.message || 'Login failed. Please verify credentials and backend connection.');
+      const msg = err.response?.data?.detail || err.message || 'Login failed. Verify credentials and network connection.';
+      setErrorMessage(msg);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
-      <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
-        {/* Branding Header */}
-        <View style={styles.header}>
-          <View style={styles.logoCircle}>
-            <Text style={styles.logoEmoji}>💧</Text>
+    <ImageBackground source={splashBg} style={styles.bgImage} resizeMode="cover">
+      {/* Dark overlay for readability */}
+      <View style={styles.overlay} />
+
+      <KeyboardAvoidingView
+        style={styles.kbView}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+          {/* Branding Header */}
+          <View style={styles.header}>
+            <Image source={appIcon} style={styles.logoImage} resizeMode="contain" />
+            <Text style={styles.title}>AquaLora</Text>
+            <Text style={styles.subtitle}>Smart Aquaculture Telemetry & Pond Management</Text>
           </View>
-          <Text style={styles.title}>AquaLora</Text>
-          <Text style={styles.subtitle}>Smart Aquaculture & Water Quality System</Text>
-        </View>
 
-        {/* Login Form Card */}
-        <View style={[styles.card, shadows.medium]}>
-          <Text style={styles.cardHeader}>Sign In</Text>
-          <Text style={styles.cardSub}>Enter your credentials to access live pond telemetry.</Text>
+          {/* Login Form Card */}
+          <View style={[styles.card, shadows.medium]}>
+            <Text style={styles.cardHeader}>Master Node Sign In</Text>
+            <Text style={styles.cardSub}>Authenticate to view live pond metrics for your facility.</Text>
 
-          {/* Error Banner */}
-          {errorMessage ? (
-            <View style={styles.errorBanner}>
-              <Text style={styles.errorBannerText}>⚠️ {errorMessage}</Text>
+            {/* Error Banner */}
+            {errorMessage ? (
+              <View style={styles.errorBanner}>
+                <Text style={styles.errorBannerText}>⚠️ {errorMessage}</Text>
+              </View>
+            ) : null}
+
+            {/* Master Node Selection */}
+            {!isManual && nodes.length > 0 ? (
+              <View style={styles.inputGroup}>
+                <View style={styles.labelRow}>
+                  <Text style={styles.inputLabel}>Facility Master Node</Text>
+                  <TouchableOpacity onPress={fetchDirectoryList} disabled={loadingDirectory}>
+                    <Text style={styles.linkText}>{loadingDirectory ? 'Refreshing…' : '🔄 Refresh'}</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <TouchableOpacity
+                  style={styles.pickerTrigger}
+                  onPress={() => setModalVisible(true)}
+                >
+                  <Text style={styles.inputIcon}>📡</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.pickerTextPrimary}>
+                      {selectedNode ? selectedNode.display_name : 'Select Master Node'}
+                    </Text>
+                    <Text style={styles.pickerTextSecondary}>
+                      {selectedNode ? `Node Code: ${selectedNode.node_code}` : 'Tap to choose from active facilities'}
+                    </Text>
+                  </View>
+                  <Text style={styles.chevronIcon}>▼</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity onPress={() => setIsManual(true)} style={styles.subAction}>
+                  <Text style={styles.linkText}>Enter node code manually</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <View style={styles.inputGroup}>
+                <View style={styles.labelRow}>
+                  <Text style={styles.inputLabel}>Master Node Code</Text>
+                  {nodes.length > 0 && (
+                    <TouchableOpacity onPress={() => setIsManual(false)}>
+                      <Text style={styles.linkText}>Choose from list</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+                <View style={styles.inputWrapper}>
+                  <Text style={styles.inputIcon}>📡</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="e.g. AQL-0001"
+                    placeholderTextColor={colors.textMuted}
+                    value={manualCode}
+                    onChangeText={(val) => setManualCode(val.toUpperCase())}
+                    autoCapitalize="characters"
+                    autoCorrect={false}
+                  />
+                </View>
+              </View>
+            )}
+
+            {/* Input: Password */}
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Password</Text>
+              <View style={styles.inputWrapper}>
+                <Text style={styles.inputIcon}>🔒</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Enter password"
+                  placeholderTextColor={colors.textMuted}
+                  value={password}
+                  onChangeText={setPassword}
+                  secureTextEntry={!showPassword}
+                  autoCapitalize="none"
+                />
+                <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
+                  <Text style={styles.toggleText}>{showPassword ? 'Hide' : 'Show'}</Text>
+                </TouchableOpacity>
+              </View>
             </View>
-          ) : null}
 
-          {/* Input: Username */}
-          <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>Username</Text>
-            <View style={styles.inputWrapper}>
-              <Text style={styles.inputIcon}>👤</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Enter username"
-                placeholderTextColor={colors.textMuted}
-                value={username}
-                onChangeText={setUsername}
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
+            {/* Login Action Button */}
+            <Button
+              title="Sign In to Facility"
+              onPress={handleLogin}
+              loading={loading}
+              size="large"
+              style={styles.submitBtn}
+            />
+          </View>
+
+          {/* Modal Node Picker */}
+          <Modal visible={modalVisible} transparent animationType="slide">
+            <View style={styles.modalOverlay}>
+              <View style={styles.modalContent}>
+                <View style={styles.modalHeader}>
+                  <Text style={styles.modalTitle}>Select Your Master Node</Text>
+                  <TouchableOpacity onPress={() => setModalVisible(false)}>
+                    <Text style={styles.modalClose}>✕</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <FlatList
+                  data={nodes}
+                  keyExtractor={(item) => item.node_code}
+                  renderItem={({ item }) => (
+                    <TouchableOpacity
+                      style={[
+                        styles.nodeItem,
+                        selectedNode?.node_code === item.node_code && styles.nodeItemSelected,
+                      ]}
+                      onPress={() => {
+                        setSelectedNode(item);
+                        setModalVisible(false);
+                      }}
+                    >
+                      <Text style={styles.nodeItemName}>{item.display_name}</Text>
+                      <Text style={styles.nodeItemCode}>Code: {item.node_code}</Text>
+                    </TouchableOpacity>
+                  )}
+                />
+              </View>
             </View>
-          </View>
+          </Modal>
 
-          {/* Input: Password */}
-          <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>Password</Text>
-            <View style={styles.inputWrapper}>
-              <Text style={styles.inputIcon}>🔒</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Enter password"
-                placeholderTextColor={colors.textMuted}
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry={!showPassword}
-                autoCapitalize="none"
-              />
-              <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
-                <Text style={styles.toggleText}>{showPassword ? 'Hide' : 'Show'}</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          {/* Login Action Button */}
-          <Button
-            title="Sign In to Dashboard"
-            onPress={handleLogin}
-            loading={loading}
-            size="large"
-            style={styles.submitBtn}
-          />
-
-          {/* Quick Demo Hint */}
-          <View style={styles.hintBox}>
-            <Text style={styles.hintTitle}>Default Credentials:</Text>
-            <Text style={styles.hintText}>Username: Admin  |  Password: Admin123</Text>
-          </View>
-        </View>
-
-        {/* Footer */}
-        <Text style={styles.footerText}>AquaLora Mobile Telemetry v1.0 • Secure IoT System</Text>
-      </ScrollView>
-    </KeyboardAvoidingView>
+          {/* Footer */}
+          <Text style={styles.footerText}>AquaLora Multi-Tenant Telemetry • Secure IoT System</Text>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </ImageBackground>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
+  bgImage: {
     flex: 1,
-    backgroundColor: colors.background,
+  },
+  overlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(5, 25, 45, 0.72)',
+  },
+  kbView: {
+    flex: 1,
   },
   scrollContent: {
     flexGrow: 1,
@@ -142,47 +259,50 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: spacing.xl,
   },
-  logoCircle: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: colors.primaryLight,
-    justifyContent: 'center',
-    alignItems: 'center',
+  logoImage: {
+    width: 90,
+    height: 90,
+    borderRadius: 20,
     marginBottom: spacing.md,
-    borderWidth: 2,
-    borderColor: colors.primary,
-  },
-  logoEmoji: {
-    fontSize: 36,
+    // Subtle glow shadow
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.5,
+    shadowRadius: 12,
   },
   title: {
     ...typography.h1,
-    color: colors.primaryDark,
+    color: '#FFFFFF',
     textAlign: 'center',
     marginBottom: 4,
+    fontSize: 34,
+    fontWeight: '800',
+    letterSpacing: 1,
   },
   subtitle: {
     ...typography.body2,
-    color: colors.textSecondary,
+    color: 'rgba(255,255,255,0.7)',
     textAlign: 'center',
   },
   card: {
-    backgroundColor: colors.surface,
+    backgroundColor: 'rgba(15, 35, 60, 0.92)',
     borderRadius: borderRadius.lg,
     padding: spacing.lg,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
   },
   cardHeader: {
     ...typography.h2,
     marginBottom: spacing.xs,
+    color: '#FFFFFF',
   },
   cardSub: {
     ...typography.body2,
-    color: colors.textSecondary,
+    color: 'rgba(255,255,255,0.55)',
     marginBottom: spacing.md,
   },
   errorBanner: {
-    backgroundColor: colors.errorLight,
+    backgroundColor: 'rgba(220,38,38,0.15)',
     borderLeftWidth: 4,
     borderLeftColor: colors.error,
     padding: spacing.sm + 4,
@@ -191,22 +311,63 @@ const styles = StyleSheet.create({
   },
   errorBannerText: {
     ...typography.caption,
-    color: colors.error,
+    color: '#FCA5A5',
     fontWeight: '600',
   },
   inputGroup: {
     marginBottom: spacing.md,
   },
+  labelRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
   inputLabel: {
     ...typography.label,
-    marginBottom: 6,
+    color: 'rgba(255,255,255,0.8)',
+  },
+  linkText: {
+    ...typography.caption,
+    color: colors.primary,
+    fontWeight: '600',
+  },
+  subAction: {
+    marginTop: 4,
+    alignSelf: 'flex-end',
+  },
+  pickerTrigger: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+    borderRadius: borderRadius.md,
+    paddingHorizontal: spacing.sm + 4,
+    paddingVertical: spacing.sm,
+    minHeight: 52,
+  },
+  pickerTextPrimary: {
+    ...typography.body1,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  pickerTextSecondary: {
+    ...typography.caption,
+    color: 'rgba(255,255,255,0.5)',
+    marginTop: 2,
+  },
+  chevronIcon: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.4)',
+    marginLeft: spacing.sm,
   },
   inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.surfaceAlt,
+    backgroundColor: 'rgba(255,255,255,0.07)',
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: 'rgba(255,255,255,0.15)',
     borderRadius: borderRadius.md,
     paddingHorizontal: spacing.sm + 4,
     height: 48,
@@ -219,6 +380,7 @@ const styles = StyleSheet.create({
     flex: 1,
     ...typography.body1,
     fontSize: 15,
+    color: '#FFFFFF',
   },
   toggleText: {
     ...typography.caption,
@@ -229,27 +391,60 @@ const styles = StyleSheet.create({
   submitBtn: {
     marginTop: spacing.sm,
   },
-  hintBox: {
-    marginTop: spacing.md,
-    padding: spacing.sm,
-    backgroundColor: colors.surfaceAlt,
-    borderRadius: borderRadius.sm,
-    alignItems: 'center',
-  },
-  hintTitle: {
-    ...typography.caption,
-    fontWeight: '700',
-    color: colors.textSecondary,
-  },
-  hintText: {
-    ...typography.caption,
-    color: colors.textMuted,
-    marginTop: 2,
-  },
   footerText: {
     ...typography.caption,
     textAlign: 'center',
-    color: colors.textMuted,
+    color: 'rgba(255,255,255,0.35)',
     marginTop: spacing.xl,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: borderRadius.lg,
+    borderTopRightRadius: borderRadius.lg,
+    padding: spacing.lg,
+    maxHeight: '70%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.md,
+    paddingBottom: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  modalTitle: {
+    ...typography.h2,
+    fontSize: 18,
+  },
+  modalClose: {
+    fontSize: 18,
+    color: colors.textMuted,
+    padding: 4,
+  },
+  nodeItem: {
+    padding: spacing.md,
+    borderRadius: borderRadius.md,
+    marginBottom: spacing.xs,
+    backgroundColor: colors.surfaceAlt,
+  },
+  nodeItemSelected: {
+    borderWidth: 1.5,
+    borderColor: colors.primary,
+    backgroundColor: colors.primaryLight,
+  },
+  nodeItemName: {
+    ...typography.body1,
+    fontWeight: '600',
+  },
+  nodeItemCode: {
+    ...typography.caption,
+    color: colors.textSecondary,
+    marginTop: 2,
   },
 });

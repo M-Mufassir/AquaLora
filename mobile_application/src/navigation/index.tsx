@@ -10,6 +10,7 @@ import { LoginScreen } from '../screens/LoginScreen';
 import { DashboardScreen } from '../screens/DashboardScreen';
 import { HistoryScreen } from '../screens/HistoryScreen';
 import { AlertsScreen } from '../screens/AlertsScreen';
+import { MasterNodeProfileScreen } from '../screens/MasterNodeProfileScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { AuthContext } from '../context/AuthContext';
 import { colors, typography } from '../theme';
@@ -57,6 +58,14 @@ function MainTabs() {
         options={{
           tabBarLabel: 'Alerts',
           tabBarIcon: ({ focused }) => <TabBarIcon emoji="🔔" focused={focused} />,
+        }}
+      />
+      <Tab.Screen
+        name="Profile"
+        component={MasterNodeProfileScreen}
+        options={{
+          tabBarLabel: 'Facility',
+          tabBarIcon: ({ focused }) => <TabBarIcon emoji="🏢" focused={focused} />,
         }}
       />
       <Tab.Screen
