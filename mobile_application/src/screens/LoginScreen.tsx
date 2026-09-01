@@ -22,7 +22,7 @@ import { Button } from '../components';
 
 // Real branding assets from assets folder
 const splashBg = require('../../assets/splash.jpg');
-const appIcon = require('../../assets/icon.png');
+const appIcon = require('../../assets/Logo.png');
 
 export const LoginScreen = () => {
   const [nodes, setNodes] = useState<DirectoryNode[]>([]);
@@ -245,7 +245,7 @@ const styles = StyleSheet.create({
   },
   overlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(5, 25, 45, 0.72)',
+    backgroundColor: 'rgba(4, 18, 31, 0.76)',
   },
   kbView: {
     flex: 1,
@@ -260,19 +260,22 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xl,
   },
   logoImage: {
-    width: 90,
-    height: 90,
-    borderRadius: 20,
+    width: 100,
+    height: 100,
+    borderRadius: 26,
     marginBottom: spacing.md,
-    // Subtle glow shadow
-    shadowColor: colors.primary,
+    backgroundColor: 'rgba(255,255,255,0.82)',
+    padding: 12,
+    borderWidth: 2,
+    borderColor: 'rgba(130, 205, 255, 0.7)',
+    shadowColor: '#7BD7FF',
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.5,
-    shadowRadius: 12,
+    shadowOpacity: 0.38,
+    shadowRadius: 18,
   },
   title: {
     ...typography.h1,
-    color: '#FFFFFF',
+    color: '#F6FBFF',
     textAlign: 'center',
     marginBottom: 4,
     fontSize: 34,
@@ -281,24 +284,24 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     ...typography.body2,
-    color: 'rgba(255,255,255,0.7)',
+    color: 'rgba(223, 238, 255, 0.8)',
     textAlign: 'center',
   },
   card: {
-    backgroundColor: 'rgba(15, 35, 60, 0.92)',
+    backgroundColor: 'rgba(6, 22, 37, 0.82)',
     borderRadius: borderRadius.lg,
     padding: spacing.lg,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    borderColor: 'rgba(150, 210, 255, 0.18)',
   },
   cardHeader: {
     ...typography.h2,
     marginBottom: spacing.xs,
-    color: '#FFFFFF',
+    color: '#F4FBFF',
   },
   cardSub: {
     ...typography.body2,
-    color: 'rgba(255,255,255,0.55)',
+    color: 'rgba(221, 235, 247, 0.72)',
     marginBottom: spacing.md,
   },
   errorBanner: {
@@ -325,11 +328,11 @@ const styles = StyleSheet.create({
   },
   inputLabel: {
     ...typography.label,
-    color: 'rgba(255,255,255,0.8)',
+    color: 'rgba(233, 245, 255, 0.86)',
   },
   linkText: {
     ...typography.caption,
-    color: colors.primary,
+    color: '#9AD9FF',
     fontWeight: '600',
   },
   subAction: {
@@ -339,9 +342,9 @@ const styles = StyleSheet.create({
   pickerTrigger: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.07)',
+    backgroundColor: 'rgba(13, 34, 52, 0.85)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
+    borderColor: 'rgba(124, 196, 255, 0.33)',
     borderRadius: borderRadius.md,
     paddingHorizontal: spacing.sm + 4,
     paddingVertical: spacing.sm,
@@ -350,11 +353,11 @@ const styles = StyleSheet.create({
   pickerTextPrimary: {
     ...typography.body1,
     fontWeight: '600',
-    color: '#FFFFFF',
+    color: '#F8FBFF',
   },
   pickerTextSecondary: {
     ...typography.caption,
-    color: 'rgba(255,255,255,0.5)',
+    color: 'rgba(210, 229, 245, 0.68)',
     marginTop: 2,
   },
   chevronIcon: {
@@ -365,9 +368,9 @@ const styles = StyleSheet.create({
   inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.07)',
+    backgroundColor: 'rgba(11, 28, 42, 0.9)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
+    borderColor: 'rgba(124, 196, 255, 0.33)',
     borderRadius: borderRadius.md,
     paddingHorizontal: spacing.sm + 4,
     height: 48,
@@ -380,12 +383,12 @@ const styles = StyleSheet.create({
     flex: 1,
     ...typography.body1,
     fontSize: 15,
-    color: '#FFFFFF',
+    color: '#F5FBFF',
   },
   toggleText: {
     ...typography.caption,
     fontWeight: '700',
-    color: colors.primary,
+    color: '#9AD9FF',
     padding: 4,
   },
   submitBtn: {
@@ -394,7 +397,7 @@ const styles = StyleSheet.create({
   footerText: {
     ...typography.caption,
     textAlign: 'center',
-    color: 'rgba(255,255,255,0.35)',
+    color: 'rgba(228, 238, 248, 0.52)',
     marginTop: spacing.xl,
   },
   modalOverlay: {

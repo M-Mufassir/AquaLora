@@ -6,11 +6,6 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
-    "splash": {
-      "image": "./assets/splash.jpg",
-      "resizeMode": "cover",
-      "backgroundColor": "#05192D"
-    },
 
     "updates": {
       "fallbackToCacheTimeout": 0

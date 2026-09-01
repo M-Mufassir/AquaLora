@@ -9,6 +9,8 @@ lerna-debug.log*
 # Diagnostic reports (https://nodejs.org/api/report.html)
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 
+
+
 # Runtime data
 pids
 *.pid
@@ -141,3 +143,25 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# Expo / React Native local state
+.expo/
+.expo-shared/
+
+# Android / iOS build outputs
+android/build/
+android/.gradle/
+android/app/build/
+android/local.properties
+ios/build/
+ios/Pods/
+ios/DerivedData/
+
+# EAS / release artifacts
+*.apk
+*.aab
+*.ipa
+
+# Local environment files for mobile apps
+mobile_application/.env
+mobile_application/.env.*

@@ -230,12 +230,14 @@ function SettingsPage(): React.JSX.Element {
       for (const cn of cloudNodes) {
         useReadingsStore.getState().upsertKnownNode({
           id: cn.node_id,
-          name: cn.name ?? undefined,
-          location: cn.location ?? undefined,
-          pond_type: cn.pond_type ?? 'tilapia',
+          name: cn.name ?? null,
+          location: cn.location ?? null,
+          pond_type: (cn.pond_type as any) ?? 'tilapia',
           custom_profile: cn.custom_profile ?? null,
           status: 'offline',
-          last_seen: null
+          last_seen: null,
+          battery_pct: null,
+          lora_rssi: null
         })
       }
       setNodesSyncFeedback(`✅ Pulled ${cloudNodes.length} node config(s) from cloud into local DB.`)
@@ -511,7 +513,7 @@ function SettingsPage(): React.JSX.Element {
           style={{ position: 'relative' }}
         >
           ☁️ Cloud Sync
-          {syncStatus.pending > 0 && (
+          {syncStatus.pendingCount > 0 && (
             <span
               style={{
                 position: 'absolute',
@@ -953,6 +955,128 @@ function SettingsPage(): React.JSX.Element {
                 ))
               )}
             </div>
+          </div>
+        </section>
+      )}
+
+      {activeTab === 'cloud' && (
+        <section className="settings-section">
+          <h2>Cloud sync and master node</h2>
+
+          <div className="settings-row stacked">
+            <label htmlFor="cloud-url-input">Cloud API URL</label>
+            <input
+              id="cloud-url-input"
+              value={cloudSyncUrl}
+              onChange={(e) => setCloudSyncUrl(e.target.value)}
+              placeholder="https://aqualora.up.railway.app"
+            />
+            <button
+              className="apply-btn"
+              onClick={async () => {
+                const trimmed = cloudSyncUrl.trim()
+                await window.api.setSetting('cloudSyncUrl', trimmed)
+                setCloudProfileFeedback(trimmed ? '✅ Cloud URL saved.' : '✅ Cloud URL cleared.')
+              }}
+            >
+              Save URL
+            </button>
+          </div>
+
+          <div className="connection-grid" style={{ marginTop: 12 }}>
+            <div className="connection-field">
+              <label htmlFor="cloud-display-name">Display name</label>
+              <input
+                id="cloud-display-name"
+                value={cloudProfileDraft.display_name}
+                onChange={(e) => setCloudProfileDraft((current) => ({ ...current, display_name: e.target.value }))}
+              />
+            </div>
+            <div className="connection-field">
+              <label htmlFor="cloud-contact-name">Contact name</label>
+              <input
+                id="cloud-contact-name"
+                value={cloudProfileDraft.contact_name}
+                onChange={(e) => setCloudProfileDraft((current) => ({ ...current, contact_name: e.target.value }))}
+              />
+            </div>
+            <div className="connection-field">
+              <label htmlFor="cloud-contact-phone">Contact phone</label>
+              <input
+                id="cloud-contact-phone"
+                value={cloudProfileDraft.contact_phone}
+                onChange={(e) => setCloudProfileDraft((current) => ({ ...current, contact_phone: e.target.value }))}
+              />
+            </div>
+            <div className="connection-field">
+              <label htmlFor="cloud-site-location">Site location</label>
+              <input
+                id="cloud-site-location"
+                value={cloudProfileDraft.site_location}
+                onChange={(e) => setCloudProfileDraft((current) => ({ ...current, site_location: e.target.value }))}
+              />
+            </div>
+          </div>
+
+          <div className="pond-actions" style={{ marginTop: 16 }}>
+            <button className="apply-btn" onClick={handleCloudProfileSync} disabled={cloudProfileLoading}>
+              {cloudProfileLoading ? 'Loading…' : 'Load cloud profile'}
+            </button>
+            <button className="apply-btn" onClick={handleCloudProfileUpload} disabled={cloudProfileLoading}>
+              Upload profile
+            </button>
+          </div>
+
+          {cloudProfile && (
+            <div className="settings-row stacked" style={{ marginTop: 16 }}>
+              <span>Cloud identity</span>
+              <strong>{cloudProfile.node_code} / {cloudProfile.display_name}</strong>
+              <small>{cloudProfile.role} • {cloudProfile.status}</small>
+            </div>
+          )}
+
+          <div className="settings-row stacked" style={{ marginTop: 18 }}>
+            <h3>Change cloud password</h3>
+            <input
+              type="password"
+              value={cloudPwdCurrent}
+              onChange={(e) => setCloudPwdCurrent(e.target.value)}
+              placeholder="Current password"
+            />
+            <input
+              type="password"
+              value={cloudPwdNew}
+              onChange={(e) => setCloudPwdNew(e.target.value)}
+              placeholder="New password"
+            />
+            <input
+              type="password"
+              value={cloudPwdConfirm}
+              onChange={(e) => setCloudPwdConfirm(e.target.value)}
+              placeholder="Confirm new password"
+            />
+            <button className="apply-btn" onClick={handleCloudPasswordUpload} disabled={cloudPwdLoading}>
+              {cloudPwdLoading ? 'Updating…' : 'Update password'}
+            </button>
+            {cloudPwdFeedback && <p className="status success-text">{cloudPwdFeedback}</p>}
+          </div>
+
+          <div className="settings-row stacked" style={{ marginTop: 18 }}>
+            <h3>Sync data to cloud</h3>
+            <div className="pond-actions">
+              <button className="apply-btn" onClick={handleCloudReadingsSync} disabled={readingsSyncLoading}>
+                {readingsSyncLoading ? 'Syncing…' : 'Sync readings'}
+              </button>
+              <button className="apply-btn" onClick={handleNodesSyncToCloud} disabled={nodesSyncLoading}>
+                {nodesSyncLoading ? 'Uploading…' : 'Upload node configs'}
+              </button>
+              <button className="apply-btn" onClick={handleNodesFetchFromCloud} disabled={nodesFetchLoading}>
+                {nodesFetchLoading ? 'Fetching…' : 'Fetch node configs'}
+              </button>
+            </div>
+            {readingsSyncFeedback && <p className="status success-text">{readingsSyncFeedback}</p>}
+            {nodesSyncFeedback && <p className="status success-text">{nodesSyncFeedback}</p>}
+            {cloudProfileFeedback && <p className="status success-text">{cloudProfileFeedback}</p>}
           </div>
         </section>
       )}

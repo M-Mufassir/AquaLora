@@ -2,10 +2,10 @@
 
 export const colors = {
   // Brand colors
-  primary: '#1E90FF',       // Ocean Blue
-  primaryDark: '#0066CC',   // Deep Blue
-  primaryLight: '#E6F2FF',  // Soft Blue Tint
-  accent: '#0EA5E9',        // Sky Blue Accent
+  primary: '#49B5FF',       // Bright Aqua Blue
+  primaryDark: '#0B6FCD',   // Deeper Ocean Blue
+  primaryLight: '#DFF3FF',  // Soft Blue Tint
+  accent: '#4CC9F0',        // Sky Blue Accent
 
   // Status colors
   success: '#10B981',       // Emerald Green (Safe / Optimal)
