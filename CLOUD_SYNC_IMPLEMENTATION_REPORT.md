@@ -17,6 +17,7 @@ All 5 user requirements for the cloud sync workflow are **already implemented in
 ## VERIFICATION COMPLETED
 
 ### ✅ Requirement 1: One-Time Login with Master Node Info
+
 - **Status**: Implemented and working
 - **How**: CloudActivationScreen collects node code + password → calls backend /auth/login → JWT token returned
 - **User Experience**: On first run, user sees "Master Node Activation" screen, enters credentials, clicks "Activate"
@@ -24,6 +25,7 @@ All 5 user requirements for the cloud sync workflow are **already implemented in
 - **File**: [desktop_application/src/renderer/src/components/CloudActivationScreen.tsx](desktop_application/src/renderer/src/components/CloudActivationScreen.tsx)
 
 ### ✅ Requirement 2: Persistent Login (No Re-login After Restart)
+
 - **Status**: Implemented and working
 - **How**: Cloud session encrypted with OS keychain (Windows/macOS/Linux) and stored in SQLite
 - **Technical**: Uses Electron's `safeStorage.encryptString()` → base64 encoded → stored in DB settings table
@@ -32,12 +34,14 @@ All 5 user requirements for the cloud sync workflow are **already implemented in
 - **Details**: See `saveCloudSession()` and `loadCloudSession()` functions
 
 ### ✅ Requirement 3: Logout Clears Session, Forces Re-login
+
 - **Status**: Implemented and working
 - **How**: Logout button → `clearCloudSession()` → deletes DB entry → app returns to CloudActivationScreen
 - **User Experience**: Click "Log out" (top-right nav) → login screen appears → must re-enter credentials
 - **File**: [desktop_application/src/renderer/src/App.tsx#L169](desktop_application/src/renderer/src/App.tsx#L169)
 
 ### ✅ Requirement 4: Automatic Background Queuing & Upload
+
 - **Status**: Implemented and working
 - **How**:
   - Readings auto-queued: masterNodeClient receives WebSocket message → insertReading() → queueOutboxEntryForReading()
@@ -47,11 +51,12 @@ All 5 user requirements for the cloud sync workflow are **already implemented in
   - Automatic retry: Failed entries stay in queue, retry_count incremented
   - Error tracking: last_error message stored in DB
   - Status broadcast: Every sync sends update to UI via IPC
-- **Files**: 
+- **Files**:
   - [desktop_application/src/main/db.ts](desktop_application/src/main/db.ts) - Outbox tables & queue functions
   - [desktop_application/src/main/index.ts#L73](desktop_application/src/main/index.ts#L73) - syncQueuedReadings()
 
 ### ✅ Requirement 5: Manual Sync + Automatic in Parallel
+
 - **Status**: Implemented and working
 - **Manual Sync Actions** (Settings → Cloud Sync tab):
   - "Sync readings" — Immediate upload of queued readings (button click → POST /readings/sync)
@@ -66,6 +71,7 @@ All 5 user requirements for the cloud sync workflow are **already implemented in
 - **File**: [desktop_application/src/renderer/src/pages/SettingsPage.tsx](desktop_application/src/renderer/src/pages/SettingsPage.tsx#L1100)
 
 ### ✅ Bonus: Internet Connectivity Awareness
+
 - **Status**: Enhanced (added 2026-09-02)
 - **How**: Network check via DNS lookup to google-dns-a.google.com (5 sec timeout)
 - **Behavior**:
@@ -180,6 +186,7 @@ All 5 user requirements for the cloud sync workflow are **already implemented in
 ## TESTING STATUS
 
 ✅ **All tests verified via code review**:
+
 - CloudActivationScreen component renders correctly
 - cloudSession encryption/decryption logic correct
 - Outbox table schema supports pending/synced/failed states
@@ -189,6 +196,7 @@ All 5 user requirements for the cloud sync workflow are **already implemented in
 - Network check function implemented with proper fallback
 
 📋 **See [CLOUD_SYNC_TESTING_GUIDE.md](CLOUD_SYNC_TESTING_GUIDE.md)** for:
+
 - 10 comprehensive manual test procedures
 - Step-by-step verification for each requirement
 - Deployment checklist
@@ -200,11 +208,13 @@ All 5 user requirements for the cloud sync workflow are **already implemented in
 ## FILES CHANGED (2026-09-02)
 
 ### 1. Desktop Settings Cloud Sync Tab
+
 **File**: [desktop_application/src/renderer/src/pages/SettingsPage.tsx](desktop_application/src/renderer/src/pages/SettingsPage.tsx)
 
 **Change**: Added complete "Cloud Sync" tab (previously was placeholder)
 
 **Includes**:
+
 - Cloud API URL input + save button
 - Cloud profile display (node code, display name, status)
 - Profile fields: display name, contact name, phone, site location
@@ -214,7 +224,8 @@ All 5 user requirements for the cloud sync workflow are **already implemented in
 - Status feedback messages
 - Real-time sync status badge integration
 
-**Code Quality**: 
+**Code Quality**:
+
 - ✅ TypeScript strict mode passes
 - ✅ All state handlers properly typed
 - ✅ Error handling with user feedback
@@ -222,9 +233,11 @@ All 5 user requirements for the cloud sync workflow are **already implemented in
 - ✅ Consistent with existing UI patterns
 
 ### 2. Enhanced Main Process Cloud Sync
+
 **File**: [desktop_application/src/main/index.ts](desktop_application/src/main/index.ts)
 
 **Changes**:
+
 - Added `checkInternetConnectivity()` function (DNS lookup)
 - Modified `syncQueuedReadings()` to accept `isManual` flag
 - Automatic sync skips gracefully if offline
@@ -233,6 +246,7 @@ All 5 user requirements for the cloud sync workflow are **already implemented in
 - Added debug logging for offline skips
 
 **Code Quality**:
+
 - ✅ TypeScript strict mode passes
 - ✅ Non-blocking async/await
 - ✅ Proper error messages
@@ -243,12 +257,14 @@ All 5 user requirements for the cloud sync workflow are **already implemented in
 ## PRODUCTION READINESS
 
 ### ✅ Code Quality
+
 - No TypeScript errors (`npm run typecheck` passes)
 - Proper error handling and user feedback
 - Secure encryption for stored sessions
 - Database transactions prevent data loss
 
 ### ✅ Features
+
 - All 5 requirements fully implemented
 - Graceful offline handling (NEW)
 - Idempotent backend endpoints
@@ -256,6 +272,7 @@ All 5 user requirements for the cloud sync workflow are **already implemented in
 - UI status feedback with badge + detailed view
 
 ### ✅ Architecture
+
 - Non-blocking async/await
 - SQLite WAL mode for safe concurrent access
 - Encrypted session storage with OS keychain
@@ -263,6 +280,7 @@ All 5 user requirements for the cloud sync workflow are **already implemented in
 - React hooks for state management
 
 ### ✅ Documentation
+
 - Code inline comments
 - Function documentation
 - Architecture diagrams (above)
@@ -274,12 +292,14 @@ All 5 user requirements for the cloud sync workflow are **already implemented in
 ## DEPLOYMENT STEPS
 
 1. **Backend** (Railway)
+
    ```bash
    # Ensure DATABASE_PUBLIC_URL is set in Railway
    railway run --service AquaLora python Backend/scripts/migrate_multitenant.py
    ```
 
 2. **Desktop App**
+
    ```bash
    cd desktop_application
    npm install
@@ -300,12 +320,15 @@ All 5 user requirements for the cloud sync workflow are **already implemented in
 ## SUPPORT & MONITORING
 
 ### Check Sync Status
+
 - **In-App**: Settings → Cloud Sync tab shows full details
 - **UI Badge**: Top nav shows 🟢/🟡/🔴 status
 - **Database**: Query SQLite outbox table for pending/failed
 
 ### Common Issues
+
 See "Troubleshooting" section in [CLOUD_SYNC_TESTING_GUIDE.md](CLOUD_SYNC_TESTING_GUIDE.md):
+
 - Persistent "Sync Error" badge
 - Readings not syncing after 2 minutes
 - "Not authenticated" errors
@@ -318,6 +341,7 @@ See "Troubleshooting" section in [CLOUD_SYNC_TESTING_GUIDE.md](CLOUD_SYNC_TESTIN
 🎉 **The complete cloud sync workflow is production-ready.**
 
 All user requirements verified and implemented:
+
 1. ✅ One-time login with persistent encryption
 2. ✅ Auto-restart without re-login
 3. ✅ Logout support

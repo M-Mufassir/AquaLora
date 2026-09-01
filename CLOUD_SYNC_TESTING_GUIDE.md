@@ -9,23 +9,27 @@ All 5 user requirements are **already implemented and production-ready**. I've a
 ## What's Implemented
 
 ### 1. ✅ One-Time Login with Master Node Info
+
 - User activates workstation with Master Node code + password (internet required)
 - Backend validates credentials via `/auth/login` endpoint
 - JWT token returned and securely stored
 
 ### 2. ✅ Persistent Login (No Re-login After Restart)
+
 - Cloud session encrypted using OS keychain (Windows/macOS) or base64 fallback
 - Stored in local SQLite database
 - Automatically loaded on app startup
 - Silent background validation checks token freshness
 
 ### 3. ✅ Logout Support
+
 - User clicks "Log out" (top-right nav)
 - Session cleared from database
 - App returns to CloudActivationScreen
 - Next start requires re-login
 
 ### 4. ✅ Automatic Background Sync
+
 - Readings/alerts automatically queued to SQLite `outbox` tables
 - Background timer triggers sync every 2 minutes
 - Gracefully skips sync if:
@@ -35,6 +39,7 @@ All 5 user requirements are **already implemented and production-ready**. I've a
 - Retries failed entries indefinitely (retry_count tracked)
 
 ### 5. ✅ Manual Sync Operations
+
 - Settings → Cloud Sync tab provides buttons:
   - "Sync readings" - Trigger immediate upload
   - "Upload node configs" - Push local settings to backend
@@ -44,6 +49,7 @@ All 5 user requirements are **already implemented and production-ready**. I've a
 - Works in parallel with automatic sync
 
 ### 6. ✅ UI Status Feedback
+
 - Nav badge shows: 🟢 Synced | 🟡 N Pending | 🔴 Error
 - Settings → Cloud Sync tab shows:
   - Cloud identity (node code, display name, status)
@@ -56,10 +62,12 @@ All 5 user requirements are **already implemented and production-ready**. I've a
 ## New Enhancement Added
 
 ### Network Connectivity Check
+
 **What**: Automatic syncs now check for internet before attempting upload
 **Why**: Prevents error log spam when offline
 **How**: DNS lookup to google-dns-a.google.com (5 sec timeout)
-**Impact**: 
+**Impact**:
+
 - Automatic sync skips gracefully if offline
 - Manual sync always attempts (user can see error)
 - Cleaner logs with debug-level messages for offline skips
@@ -71,6 +79,7 @@ All 5 user requirements are **already implemented and production-ready**. I've a
 ## PRACTICAL TESTING GUIDE
 
 ### Prerequisites
+
 - Desktop app built and running
 - Railway backend accessible at public URL (e.g., `https://aqualora.up.railway.app`)
 - Default Master Node seeded: code=`AQL-0001`, password=`Admin123`
@@ -81,6 +90,7 @@ All 5 user requirements are **already implemented and production-ready**. I've a
 ### Test 1: First-Time Activation
 
 **Steps**:
+
 1. **Delete the desktop app database** to simulate fresh install
    - On Windows: `%APPDATA%\aqualora-dashboard\aqualora.db`
    - On macOS: `~/Library/Application Support/aqualora-dashboard/aqualora.db`
@@ -103,6 +113,7 @@ All 5 user requirements are **already implemented and production-ready**. I've a
 ### Test 2: Persistent Login (Restart)
 
 **Steps**:
+
 1. **Close desktop app completely**
 
 2. **Restart desktop app**
@@ -115,6 +126,7 @@ All 5 user requirements are **already implemented and production-ready**. I've a
 **Expected Result**: ✅ Logged in automatically without re-entering credentials
 
 **Verification**:
+
 - Open DevTools (F12)
 - Check renderer console for: `[App] Stored cloud session is no longer valid` (if token expired)
 - Should NOT see this if token is fresh
@@ -124,6 +136,7 @@ All 5 user requirements are **already implemented and production-ready**. I've a
 ### Test 3: Logout & Re-login
 
 **Steps**:
+
 1. **Click "Log out" button** (top-right nav, next to theme toggle)
 
 2. **Observe**:
@@ -139,12 +152,14 @@ All 5 user requirements are **already implemented and production-ready**. I've a
 
 ### Test 4: Automatic Cloud Sync
 
-**Prerequisites**: 
+**Prerequisites**:
+
 - Desktop app logged in
 - Cloud URL configured (Settings → Connection → Cloud backup URL)
 - Internet connectivity
 
 **Steps**:
+
 1. **Send test reading** to local Master Node
    - Via WebSocket: `{"node_id": "slave-01", "timestamp": "2026-09-02T...", "temperature": 28.5, ...}`
    - Or use firmware simulator
@@ -163,6 +178,7 @@ All 5 user requirements are **already implemented and production-ready**. I've a
    ```bash
    railway run --service AquaLora psql "$DATABASE_PUBLIC_URL" -c "SELECT COUNT(*) FROM readings"
    ```
+
    - Should see reading count increased
 
 **Expected Result**: ✅ Reading synced to cloud automatically
@@ -172,6 +188,7 @@ All 5 user requirements are **already implemented and production-ready**. I've a
 ### Test 5: Manual Sync Button
 
 **Steps**:
+
 1. **Send another test reading**
    - Verify it appears in desktop app Logs
    - Nav badge shows: 🟡 "1 Pending"
@@ -192,6 +209,7 @@ All 5 user requirements are **already implemented and production-ready**. I've a
 ### Test 6: Node Config Upload/Download
 
 **Steps**:
+
 1. **Go to Settings → Ponds**
    - Edit a pond: change name or location
    - Change pond type
@@ -202,6 +220,7 @@ All 5 user requirements are **already implemented and production-ready**. I've a
    - Wait for: ✅ "Uploaded N node config(s) to cloud"
 
 3. **Verify in Railway backend**:
+
    ```bash
    railway run --service AquaLora psql "$DATABASE_PUBLIC_URL" \
      -c "SELECT node_id, name, location, pond_type FROM node_configs LIMIT 5"
@@ -219,6 +238,7 @@ All 5 user requirements are **already implemented and production-ready**. I've a
 ### Test 7: Cloud Password Change
 
 **Steps**:
+
 1. **Go to Settings → Cloud Sync**
    - Scroll to "Change cloud password"
    - Current password: `Admin123`
@@ -241,6 +261,7 @@ All 5 user requirements are **already implemented and production-ready**. I've a
 ### Test 8: Network Connectivity Check (NEW)
 
 **Prerequisites**:
+
 - Desktop app running on Windows/macOS with network access
 
 **Test A: Online → Offline**
@@ -287,6 +308,7 @@ All 5 user requirements are **already implemented and production-ready**. I've a
 ### Test 9: Parallel Automatic + Manual Sync
 
 **Steps**:
+
 1. **Desktop app online, logged in**
 
 2. **Send 5 test readings**
@@ -312,9 +334,11 @@ All 5 user requirements are **already implemented and production-ready**. I've a
 ### Test 10: Session Expiry Recovery
 
 **Steps**:
+
 1. **Desktop app logged in**
 
 2. **Go to Railway backend, directly delete the Master Node**:
+
    ```bash
    railway run --service AquaLora psql "$DATABASE_PUBLIC_URL" \
      -c "DELETE FROM master_nodes WHERE node_code = 'AQL-0001'"
@@ -328,6 +352,7 @@ All 5 user requirements are **already implemented and production-ready**. I've a
    - Should fail with "Invalid credentials"
 
 5. **Re-seed the Master Node**:
+
    ```bash
    railway run --service AquaLora python Backend/scripts/migrate_multitenant.py
    ```
@@ -342,6 +367,7 @@ All 5 user requirements are **already implemented and production-ready**. I've a
 ## DEPLOYMENT CHECKLIST
 
 ### Backend (Railway)
+
 - [ ] `DATABASE_PUBLIC_URL` environment variable set
 - [ ] FastAPI app running: `flask run` or `python -m uvicorn Backend.app.main:app`
 - [ ] Migration script run: `railway run --service AquaLora python Backend/scripts/migrate_multitenant.py`
@@ -349,6 +375,7 @@ All 5 user requirements are **already implemented and production-ready**. I've a
 - [ ] CORS enabled (already in main.py)
 
 ### Desktop App
+
 - [ ] `npm install` and dependencies resolved
 - [ ] `npm run build` completes without errors
 - [ ] Cloud URL stored in settings (Settings → Connection → Cloud backup URL)
@@ -356,6 +383,7 @@ All 5 user requirements are **already implemented and production-ready**. I've a
 - [ ] OS keychain accessible (Windows/macOS)
 
 ### Mobile App
+
 - [ ] Mobile API base URL set to backend root (no `/api` suffix)
 - [ ] Backend URL in `mobile_application/src/config.ts`
 - [ ] EAS build succeeds
@@ -365,11 +393,14 @@ All 5 user requirements are **already implemented and production-ready**. I've a
 ## MONITORING & TROUBLESHOOTING
 
 ### Check Automatic Sync Status
+
 **In-App**:
+
 - Look at nav badge (top-right): shows pending count and last error
 - Go to Settings → Cloud Sync: shows full details
 
 **In Logs**:
+
 - Desktop app console: `[main]` log entries
 - Backend: check Postgres for reading/alert counts
 
@@ -378,6 +409,7 @@ All 5 user requirements are **already implemented and production-ready**. I've a
 **Issue**: Nav badge shows 🔴 "Sync Error" persistently
 
 **Diagnosis**:
+
 1. Check error message in Settings → Cloud Sync
 2. Run manual sync to see exact error
 3. Check backend URL is correct
@@ -387,6 +419,7 @@ All 5 user requirements are **already implemented and production-ready**. I've a
 **Issue**: Readings not syncing after 2 min
 
 **Diagnosis**:
+
 1. Is cloud URL configured? (Settings → Connection)
 2. Is app authenticated? (Not showing CloudActivationScreen?)
 3. Is there internet? (Try manual sync to see error)
@@ -395,6 +428,7 @@ All 5 user requirements are **already implemented and production-ready**. I've a
 **Issue**: "Not authenticated" error when manually syncing
 
 **Diagnosis**:
+
 1. Token may have expired (logout and re-login)
 2. Backend Master Node may have been deleted
 3. Cloud session not properly encrypted/stored
@@ -402,6 +436,7 @@ All 5 user requirements are **already implemented and production-ready**. I've a
 ### Viewing Database
 
 **Desktop App Database** (SQLite3):
+
 ```bash
 # On Windows
 sqlite3 "%APPDATA%\aqualora-dashboard\aqualora.db"
@@ -411,6 +446,7 @@ SELECT id, reading_id, status, retry_count, last_error FROM outbox WHERE status 
 ```
 
 **Backend Database** (PostgreSQL):
+
 ```bash
 railway run --service AquaLora psql "$DATABASE_PUBLIC_URL"
 
@@ -429,6 +465,7 @@ SELECT * FROM node_configs LIMIT 5;
 ## SUMMARY
 
 ✅ **All 5 requirements fully implemented**:
+
 1. One-time login ✅
 2. Persistent sessions ✅
 3. Logout support ✅
@@ -455,6 +492,7 @@ SELECT * FROM node_configs LIMIT 5;
 ## Support
 
 If you encounter issues during testing, please share:
+
 - Exact error message
 - Which test step it occurred on
 - Desktop app console logs (F12 → Console)
