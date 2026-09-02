@@ -148,6 +148,11 @@ vite.config.ts.timestamp-*
 .expo/
 .expo-export/
 .expo-shared/
+mobile_application/.expo/
+mobile_application/.expo-export/
+mobile_application/.expo-shared/
+mobile_application/android/
+mobile_application/dist/
 
 # Python caches and local envs
 __pycache__/
