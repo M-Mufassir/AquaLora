@@ -1,6 +1,6 @@
 // src/screens/SettingsScreen.tsx
 
-import React, { useState, useContext, useCallback } from 'react';
+import React, { useState, useContext, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -139,6 +139,10 @@ export const SettingsScreen = () => {
   const [contactPhone, setContactPhone] = useState('');
   const [siteLocation, setSiteLocation] = useState('');
   const [profileSaving, setProfileSaving] = useState(false);
+
+  useEffect(() => {
+    setDisplayName(user?.displayName || '');
+  }, [user?.displayName]);
 
   // Password state
   const [currentPwd, setCurrentPwd] = useState('');
@@ -291,10 +295,10 @@ export const SettingsScreen = () => {
             </View>
             <View style={styles.profileDetails}>
               <Text style={styles.usernameText}>
-                {user?.displayName || user?.nodeCode || user?.username || 'Master Node'}
+                {user?.displayName || user?.nodeCode || user?.username || 'Facility profile unavailable'}
               </Text>
               <Text style={styles.roleBadge}>
-                Node Code: {user?.nodeCode || user?.username || 'AQL-0001'} ({user?.role || 'customer'})
+                Node Code: {user?.nodeCode || user?.username || 'Not available'} ({user?.role || 'master_node'})
               </Text>
             </View>
           </View>

@@ -42,9 +42,9 @@ export async function login(nodeCode: string, password: string): Promise<AuthRes
 
   const token = rawData.access_token || rawData.token || '';
   const node = rawData.node_code || rawData.username || nodeCode;
-  const displayName = rawData.display_name || node;
-  const role = rawData.role || 'customer';
-  const masterNodeId = rawData.master_node_id || 1;
+  const displayName = rawData.display_name || rawData.username || node || 'Master Node';
+  const role = rawData.role || 'master_node';
+  const masterNodeId = rawData.master_node_id ?? 0;
 
   if (!token) {
     throw new Error('Authentication failed: No access token received from server.');
