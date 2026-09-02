@@ -146,7 +146,17 @@ vite.config.ts.timestamp-*
 
 # Expo / React Native local state
 .expo/
+.expo-export/
 .expo-shared/
+
+# Python caches and local envs
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Windows crash dumps / temp build artifacts
+*.stackdump
 
 # Android / iOS build outputs
 android/build/

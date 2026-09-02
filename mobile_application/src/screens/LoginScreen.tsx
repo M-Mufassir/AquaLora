@@ -275,7 +275,7 @@ const styles = StyleSheet.create({
   },
   title: {
     ...typography.h1,
-    color: '#F6FBFF',
+    color: '#F8FCFF',
     textAlign: 'center',
     marginBottom: 4,
     fontSize: 34,
@@ -284,15 +284,16 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     ...typography.body2,
-    color: 'rgba(223, 238, 255, 0.8)',
+    color: '#E3F4FF',
     textAlign: 'center',
+    fontWeight: '600',
   },
   card: {
-    backgroundColor: 'rgba(6, 22, 37, 0.82)',
+    backgroundColor: 'rgba(7, 22, 35, 0.86)',
     borderRadius: borderRadius.lg,
     padding: spacing.lg,
     borderWidth: 1,
-    borderColor: 'rgba(150, 210, 255, 0.18)',
+    borderColor: 'rgba(143, 214, 255, 0.28)',
   },
   cardHeader: {
     ...typography.h2,
@@ -301,8 +302,9 @@ const styles = StyleSheet.create({
   },
   cardSub: {
     ...typography.body2,
-    color: 'rgba(221, 235, 247, 0.72)',
+    color: '#EAF7FF',
     marginBottom: spacing.md,
+    fontWeight: '600',
   },
   errorBanner: {
     backgroundColor: 'rgba(220,38,38,0.15)',
@@ -352,13 +354,14 @@ const styles = StyleSheet.create({
   },
   pickerTextPrimary: {
     ...typography.body1,
-    fontWeight: '600',
+    fontWeight: '700',
     color: '#F8FBFF',
   },
   pickerTextSecondary: {
     ...typography.caption,
-    color: 'rgba(210, 229, 245, 0.68)',
+    color: '#DDEFFF',
     marginTop: 2,
+    fontWeight: '600',
   },
   chevronIcon: {
     fontSize: 12,
@@ -384,6 +387,7 @@ const styles = StyleSheet.create({
     ...typography.body1,
     fontSize: 15,
     color: '#F5FBFF',
+    fontWeight: '600',
   },
   toggleText: {
     ...typography.caption,

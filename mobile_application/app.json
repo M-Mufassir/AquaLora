@@ -6,7 +6,11 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
-
+    "splash": {
+      "image": "./assets/splash.png",
+      "backgroundColor": "#0B1F2A",
+      "resizeMode": "contain"
+    },
     "updates": {
       "fallbackToCacheTimeout": 0
     },
@@ -17,9 +21,10 @@
       "supportsTablet": true
     },
     "android": {
+      "icon": "./assets/icon.png",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#FFFFFF"
+        "backgroundColor": "#0B1F2A"
       },
       "package": "com.mfsr.aqualoramobile"
     },

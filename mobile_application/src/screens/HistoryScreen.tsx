@@ -49,10 +49,18 @@ export const HistoryScreen = () => {
   const fetchHistory = useCallback(async (isRefresh = false) => {
     if (!isRefresh) setLoading(true);
     try {
-      const data = await apiService.get<Reading[]>('/readings/latest');
+      const now = new Date();
+      const rangeMs = selectedPeriod === '24h' ? 24 * 60 * 60 * 1000 : selectedPeriod === '7d' ? 7 * 24 * 60 * 60 * 1000 : 30 * 24 * 60 * 60 * 1000;
+      const start = new Date(now.getTime() - rangeMs).toISOString();
+      const data = await apiService.get<Reading[]>('/readings/history', {
+        start,
+        end: now.toISOString(),
+        limit: 200,
+      });
       const readingsArray = Array.isArray(data) ? data : [data];
-      setReadings(readingsArray);
-      await saveCache(CACHE_KEYS.HISTORY, readingsArray);
+      const sorted = [...readingsArray].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+      setReadings(sorted);
+      await saveCache(CACHE_KEYS.HISTORY, sorted);
       setIsOfflineMode(false);
     } catch (err) {
       console.warn('Failed to load live telemetry history, attempting cache fallback:', err);
@@ -60,12 +68,14 @@ export const HistoryScreen = () => {
       if (cached && cached.data.length > 0) {
         setReadings(cached.data);
         setIsOfflineMode(true);
+      } else {
+        setReadings([]);
       }
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [selectedPeriod]);
 
   useEffect(() => {
     fetchHistory();
@@ -78,27 +88,24 @@ export const HistoryScreen = () => {
 
   const activeMetricConfig = METRICS.find(m => m.key === selectedMetric)!;
 
-  // Generate trend data points based on period and readings or simulated telemetry curve
   const getTrendDataPoints = () => {
-    const count = selectedPeriod === '24h' ? 8 : selectedPeriod === '7d' ? 7 : 12;
-    const baseValue = readings.length > 0 ? Number(readings[0][selectedMetric] ?? activeMetricConfig.safeMin) : (activeMetricConfig.safeMin + activeMetricConfig.safeMax) / 2;
+    if (!readings.length) return [];
 
-    const points = [];
-    const now = new Date();
-
-    for (let i = count - 1; i >= 0; i--) {
-      // Create subtle oscillation for trend chart representation
-      const variation = (Math.sin(i * 0.8) * 0.15 + (Math.random() - 0.5) * 0.1) * baseValue;
-      const val = Math.max(0, baseValue + variation);
-      const timeLabel = selectedPeriod === '24h'
-        ? `${(now.getHours() - i * 3 + 24) % 24}:00`
+    const limit = selectedPeriod === '24h' ? 8 : selectedPeriod === '7d' ? 7 : 12;
+    const displayData = readings.slice(-limit);
+    return displayData.map((reading) => {
+      const date = new Date(reading.timestamp);
+      const label = selectedPeriod === '24h'
+        ? date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         : selectedPeriod === '7d'
-        ? `Day ${count - i}`
-        : `W${Math.ceil((count - i) / 3)}`;
+          ? date.toLocaleDateString([], { month: 'short', day: 'numeric' })
+          : `W${Math.ceil((date.getDate() || 1) / 7)}`;
 
-      points.push({ label: timeLabel, value: val });
-    }
-    return points;
+      return {
+        label,
+        value: Number(reading[selectedMetric] ?? 0),
+      };
+    });
   };
 
   const trendPoints = getTrendDataPoints();
