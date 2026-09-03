@@ -32,7 +32,7 @@ npm install
 ### Configuration
 Edit `src/config.ts` if needed:
 ```typescript
-export const API_BASE_URL = 'http://localhost:8000'; // Or your Railway production endpoint
+export const API_BASE_URL = 'https://aqualora.up.railway.app/api';
 ```
 *(For Android emulator accessing host localhost, use `http://10.0.2.2:8000`)*
 
