@@ -1,0 +1,46 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-aqualora}
+      POSTGRES_USER: ${POSTGRES_USER:-aqualora}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aqualora123}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aqualora} -d ${POSTGRES_DB:-aqualora}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./Backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://aqualora:aqualora123@postgres:5432/aqualora}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-Admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-change-this-admin-password}
+      JWT_SECRET: ${JWT_SECRET:-change-this-long-random-jwt-secret}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose:
+      - "8000"
+
+  frontend:
+    build:
+      context: ./Frontend
+      args:
+        VITE_API_URL: /api
+    restart: unless-stopped
+    environment:
+      PORT: ${PORT:-80}
+    depends_on:
+      - backend
+    ports:
+      - "${PORT:-5174}:${PORT:-80}"
+
+volumes:
+  postgres_data:

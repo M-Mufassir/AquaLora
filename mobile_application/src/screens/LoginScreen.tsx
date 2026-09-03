@@ -20,13 +20,8 @@ import { getDirectory, DirectoryNode } from '../services/authService';
 import { colors, borderRadius, spacing, typography, shadows } from '../theme';
 import { Button } from '../components';
 
-// Use externally hosted imagery so the login screen works without local asset files.
-const splashBg = {
-  uri: 'https://images.unsplash.com/photo-1544551763-46a013bb70b7?auto=format&fit=crop&w=1200&q=80',
-};
-const appIcon = {
-  uri: 'https://images.unsplash.com/photo-1522069169874-c58ec4b76be5?auto=format&fit=crop&w=512&q=80',
-};
+const splashBg = require('../../assets/splash.jpg');
+const appIcon = require('../../assets/Logo.png');
 
 export const LoginScreen = () => {
   const [nodes, setNodes] = useState<DirectoryNode[]>([]);

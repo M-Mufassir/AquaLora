@@ -4,6 +4,9 @@
   "description": "AquaLoRa dashboard — desktop app for real-time water quality monitoring and early-warning protection of fish/prawn ponds",
   "main": "./out/main/index.js",
   "author": "AquaLoRa Team",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "format": "prettier --write .",
     "lint": "eslint --cache .",

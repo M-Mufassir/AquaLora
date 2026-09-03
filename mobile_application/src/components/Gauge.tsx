@@ -6,7 +6,7 @@ import { colors, borderRadius, spacing, typography, shadows } from '../theme';
 
 interface GaugeProps {
   title: string;
-  value: number;
+  value: number | null;
   unit: string;
   min: number;
   max: number;
@@ -27,6 +27,20 @@ export const Gauge: React.FC<GaugeProps> = ({
   icon,
   precision = 1,
 }) => {
+  if (value == null) {
+    return (
+      <View style={[styles.card, shadows.medium, { borderLeftColor: colors.textMuted }]}>
+        <View style={styles.header}>
+          <View style={styles.titleContainer}>
+            {icon ? <Text style={styles.icon}>{icon}</Text> : null}
+            <Text style={styles.title}>{title}</Text>
+          </View>
+          <Text style={[styles.badgeText, { color: colors.textMuted }]}>Not reported</Text>
+        </View>
+      </View>
+    );
+  }
+
   // Determine status level
   const getStatus = (): 'safe' | 'warning' | 'critical' => {
     if (value < safeMin || value > safeMax) return 'critical';

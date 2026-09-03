@@ -546,16 +546,6 @@ app.whenReady().then(() => {
     return cloudNodes
   })
 
-
-
-  const savedWifiSsid = getSettingOptional('wifi_ssid')
-  const savedWifiPassword = getSettingOptional('wifi_password')
-  if (savedWifiSsid && savedWifiPassword) {
-    connectToNetwork(savedWifiSsid, savedWifiPassword).catch((err) => {
-      console.warn('[main] saved WiFi connection failed:', err)
-    })
-  }
-
   decisionEngine.start()
 
   masterNodeClient.onStatusChange((status) => {
@@ -664,6 +654,14 @@ app.whenReady().then(() => {
   })()
 
   createWindow()
+
+  const savedWifiSsid = getSettingOptional('wifi_ssid')
+  const savedWifiPassword = getSettingOptional('wifi_password')
+  if (savedWifiSsid && savedWifiPassword) {
+    connectToNetwork(savedWifiSsid, savedWifiPassword).catch((err) => {
+      console.warn('[main] saved WiFi connection failed:', err)
+    })
+  }
 
   app.on('activate', function () {
     // On macOS it's common to re-create a window in the app when the

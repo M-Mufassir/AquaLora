@@ -87,6 +87,16 @@ class CreateMasterNodeRequest(BaseModel):
     role: str = 'customer'
 
 
+class AdminMasterNodeUpdateRequest(BaseModel):
+    display_name: str | None = None
+    contact_name: str | None = None
+    contact_phone: str | None = None
+    site_location: str | None = None
+    pond_type: str | None = None
+    role: str | None = None
+    status: str | None = None
+
+
 class ReadingPayload(BaseModel):
     node_id: str
     timestamp: str
@@ -388,6 +398,117 @@ def create_master_node(
             created_at=new_node.created_at,
             updated_at=new_node.updated_at,
         )
+
+
+@app.get('/admin/master-nodes', response_model=list[MasterNodeProfileResponse])
+def list_master_nodes(
+    _: dict[str, Any] = Depends(require_super_admin),
+) -> list[MasterNodeProfileResponse]:
+    with get_session() as session:
+        nodes = session.exec(select(MasterNode).order_by(MasterNode.node_code)).all()
+        return [
+            MasterNodeProfileResponse(
+                id=node.id,
+                node_code=node.node_code,
+                display_name=node.display_name,
+                contact_name=node.contact_name,
+                contact_phone=node.contact_phone,
+                site_location=node.site_location,
+                pond_type=node.pond_type,
+                installed_at=node.installed_at,
+                role=node.role,
+                status=node.status,
+                created_at=node.created_at,
+                updated_at=node.updated_at,
+            )
+            for node in nodes
+        ]
+
+
+@app.patch('/admin/master-nodes/{master_node_id}', response_model=MasterNodeProfileResponse)
+def update_master_node(
+    master_node_id: int,
+    payload: AdminMasterNodeUpdateRequest,
+    _: dict[str, Any] = Depends(require_super_admin),
+) -> MasterNodeProfileResponse:
+    with get_session() as session:
+        node = session.get(MasterNode, master_node_id)
+        if node is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Master node not found')
+
+        for field_name in ('display_name', 'contact_name', 'contact_phone', 'site_location', 'pond_type'):
+            value = getattr(payload, field_name)
+            if value is not None:
+                setattr(node, field_name, value.strip() or None)
+        if payload.role in ('customer', 'super_admin'):
+            node.role = payload.role
+        if payload.status in ('active', 'suspended'):
+            node.status = payload.status
+        node.updated_at = datetime.now(timezone.utc).isoformat()
+        session.add(node)
+        session.commit()
+        session.refresh(node)
+        return MasterNodeProfileResponse(
+            id=node.id,
+            node_code=node.node_code,
+            display_name=node.display_name,
+            contact_name=node.contact_name,
+            contact_phone=node.contact_phone,
+            site_location=node.site_location,
+            pond_type=node.pond_type,
+            installed_at=node.installed_at,
+            role=node.role,
+            status=node.status,
+            created_at=node.created_at,
+            updated_at=node.updated_at,
+        )
+
+
+@app.get('/admin/readings/history')
+def admin_readings_history(
+    limit: int = Query(default=200, le=500),
+    _: dict[str, Any] = Depends(require_super_admin),
+) -> list[dict[str, Any]]:
+    with get_session() as session:
+        rows = session.exec(select(Reading).order_by(Reading.timestamp.desc()).limit(limit)).all()
+    return [
+        {
+            'id': row.id,
+            'master_node_id': row.master_node_id,
+            'node_id': row.node_id,
+            'timestamp': row.timestamp,
+            'temperature': row.temperature,
+            'turbidity': row.turbidity,
+            'tds': row.tds,
+            'ph': row.ph,
+            'pond_type': row.pond_type,
+            'battery_pct': row.battery_pct,
+            'rssi': row.rssi,
+        }
+        for row in rows
+    ]
+
+
+@app.get('/admin/alerts/history')
+def admin_alerts_history(
+    limit: int = Query(default=200, le=500),
+    _: dict[str, Any] = Depends(require_super_admin),
+) -> list[dict[str, Any]]:
+    with get_session() as session:
+        rows = session.exec(select(Alert).order_by(Alert.timestamp.desc()).limit(limit)).all()
+    return [
+        {
+            'id': row.id,
+            'master_node_id': row.master_node_id,
+            'node_id': row.node_id,
+            'timestamp': row.timestamp,
+            'parameter': row.parameter,
+            'severity': row.severity,
+            'message': row.message,
+            'created_at': row.created_at,
+        }
+        for row in rows
+    ]
 
 
 @app.post('/readings/sync')

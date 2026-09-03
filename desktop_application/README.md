@@ -2,6 +2,19 @@
 
 Desktop dashboard application for **AquaLoRa** — a LoRa-based, solar-powered IoT system for real-time water quality monitoring and early-warning protection of fish and prawn ponds.
 
+## Running On Windows
+
+Use Node.js 22 or newer. The desktop app uses `better-sqlite3`, which is a native Electron module and must be rebuilt during installation. Before running `npm install`, install Visual Studio 2022 Build Tools with the **Desktop development with C++** workload, including the Windows 10/11 SDK and MSVC build tools.
+
+From this directory, install and start the app:
+
+```bash
+npm install
+npm run dev
+```
+
+If an earlier install stopped at `better-sqlite3`, close running Electron/Node processes, remove `node_modules`, and run the two commands again after installing the C++ workload. `electron-vite` is installed locally by `npm install`; it is not expected to be available as a global command.
+
 This README covers (1) how this dashboard fits into the full AquaLoRa system, (2) this repo's own architecture, (3) what's been built so far and how to run it, (4) the exact wire protocol/encryption and node-detection techniques underneath the pairing flow, and (5) what's left before this can go live on real hardware.
 
 ---

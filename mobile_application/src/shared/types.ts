@@ -17,10 +17,10 @@ export interface Reading {
   id?: number;
   node_id: string;
   timestamp: string;
-  temperature: number;
-  turbidity: number;
-  tds: number;
-  ph: number;
+  temperature: number | null;
+  turbidity: number | null;
+  tds: number | null;
+  ph: number | null;
   battery_pct?: number;
   rssi?: number;
   pond_type?: string;

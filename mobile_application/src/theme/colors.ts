@@ -2,25 +2,25 @@
 
 export const colors = {
   // Brand colors
-  primary: '#49B5FF',       // Bright Aqua Blue
-  primaryDark: '#0B6FCD',   // Deeper Ocean Blue
-  primaryLight: '#DFF3FF',  // Soft Blue Tint
-  accent: '#4CC9F0',        // Sky Blue Accent
+  primary: '#1769AA',       // Reliable ocean blue for controls and links
+  primaryDark: '#0D477A',   // Deep blue for emphasis and contrast
+  primaryLight: '#E6F4FF',  // Soft blue tint for selected surfaces
+  accent: '#0E9FC2',        // Teal-blue visual accent
 
   // Status colors
-  success: '#10B981',       // Emerald Green (Safe / Optimal)
+  success: '#16804B',       // Dark emerald for readable status text
   successLight: '#D1FAE5',
-  warning: '#F59E0B',       // Amber (Warning / Moderate)
+  warning: '#A15C00',       // Dark amber for readable status text
   warningLight: '#FEF3C7',
-  error: '#EF4444',         // Coral Red (Critical / Action required)
+  error: '#B42318',         // Dark red for readable status text
   errorLight: '#FEE2E2',
-  info: '#3B82F6',          // Informational Blue
+  info: '#2563B8',          // Informational blue
   infoLight: '#DBEAFE',
 
   // Surfaces & Backgrounds
-  background: '#F3F9FF',    // Main App Background
+  background: '#F5F9FD',    // Main App Background
   surface: '#FFFFFF',       // Card & Sheet Surface
-  surfaceAlt: '#EDF6FF',    // Secondary Surface
+  surfaceAlt: '#EAF4FC',    // Secondary Surface
   surfaceElevated: '#FFFFFF',
 
   // Typography / Text
@@ -31,9 +31,9 @@ export const colors = {
   textInverse: '#FFFFFF',   // Light text on dark surfaces
 
   // Borders & Dividers
-  border: '#D8E8F8',        // Light Border
-  borderDark: '#B7CEE6',    // Darker Border
-  divider: '#EAF3FF',       // Divider Lines
+  border: '#CFE1F1',        // Light Border
+  borderDark: '#A9C7E0',    // Darker Border
+  divider: '#DCEBF7',       // Divider Lines
 
   // Gauges & Visuals
   gaugeTrack: '#E2ECF6',

@@ -83,13 +83,21 @@ export const DashboardScreen = () => {
     await Promise.all([fetchNodeConfigs(), fetchReadings(true)]);
   };
 
-  const currentReading = readings.find(r => r.node_id === selectedNodeId) || readings[0];
+  const currentReading = selectedNodeId
+    ? readings.find(r => r.node_id === selectedNodeId)
+    : readings[0];
   const currentConfig = selectedNodeId ? nodeConfigs[selectedNodeId] : null;
   const profile: PondThresholdProfile = getEffectiveProfile(currentConfig);
+  const nodeIds = Array.from(new Set([
+    ...Object.keys(nodeConfigs),
+    ...readings.map(reading => reading.node_id),
+  ])).sort();
 
   // Dynamic FHI calculation using the active node's pond species profile
   const calculateFHI = (r?: Reading, p?: PondThresholdProfile) => {
-    if (!r) return { score: 0, status: 'Unknown', color: colors.textMuted };
+    if (!r || r.temperature == null || r.turbidity == null || r.tds == null || r.ph == null) {
+      return { score: 0, status: 'Unknown', color: colors.textMuted };
+    }
     const thresholds = p || profile;
     let score = 100;
 
@@ -172,29 +180,29 @@ export const DashboardScreen = () => {
             <Text style={styles.errorMessage}>{error}</Text>
             <Button title="Retry Sync" onPress={() => fetchReadings()} style={styles.retryBtn} />
           </View>
-        ) : currentReading ? (
+        ) : (
           <>
             {/* Multi-Node Selector Bar */}
-            {readings.length > 1 ? (
+            {nodeIds.length > 0 ? (
               <View style={styles.nodeSelector}>
                 <Text style={styles.selectorLabel}>Active Node:</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                  {readings.map(r => (
+                  {nodeIds.map(nodeId => (
                     <TouchableOpacity
-                      key={r.node_id}
+                      key={nodeId}
                       style={[
                         styles.nodePill,
-                        selectedNodeId === r.node_id && styles.nodePillActive,
+                        selectedNodeId === nodeId && styles.nodePillActive,
                       ]}
-                      onPress={() => setSelectedNodeId(r.node_id)}
+                      onPress={() => setSelectedNodeId(nodeId)}
                     >
                       <Text
                         style={[
                           styles.nodePillText,
-                          selectedNodeId === r.node_id && styles.nodePillTextActive,
+                          selectedNodeId === nodeId && styles.nodePillTextActive,
                         ]}
                       >
-                        {r.node_id}
+                        {nodeId}
                       </Text>
                     </TouchableOpacity>
                   ))}
@@ -202,6 +210,17 @@ export const DashboardScreen = () => {
               </View>
             ) : null}
 
+            {!currentReading ? (
+              <View style={[styles.card, shadows.medium, styles.emptyCard]}>
+                <Text style={styles.cardTitle}>No telemetry reported</Text>
+                <Text style={styles.errorMessage}>
+                  The selected node has no readings in the backend database yet.
+                </Text>
+              </View>
+            ) : null}
+
+            {currentReading && (
+            <View>
             {/* Fish Health Index (FHI) Summary Card */}
             <View style={[styles.card, shadows.medium, styles.fhiCard]}>
               <View style={styles.fhiHeader}>
@@ -275,19 +294,27 @@ export const DashboardScreen = () => {
               <Text style={styles.cardTitle}>Node Telemetry & Signal</Text>
               <View style={styles.infoRow}>
                 <Text style={styles.infoLabel}>🔋 Battery Level</Text>
-                <Text style={styles.infoValue}>{currentReading.battery_pct ?? 100}%</Text>
+                <Text style={styles.infoValue}>
+                  {currentReading.battery_pct == null ? 'Not reported' : `${currentReading.battery_pct}%`}
+                </Text>
               </View>
               <View style={styles.infoRow}>
                 <Text style={styles.infoLabel}>📡 RSSI Signal Strength</Text>
-                <Text style={styles.infoValue}>{currentReading.rssi ?? -65} dBm</Text>
+                <Text style={styles.infoValue}>
+                  {currentReading.rssi == null ? 'Not reported' : `${currentReading.rssi} dBm`}
+                </Text>
               </View>
               <View style={styles.infoRow}>
                 <Text style={styles.infoLabel}>🏞️ Pond Environment</Text>
-                <Text style={styles.infoValue}>{currentReading.pond_type || 'Freshwater Aquaculture'}</Text>
+                <Text style={styles.infoValue}>
+                  {currentReading.pond_type || currentConfig?.pond_type || 'Not reported'}
+                </Text>
               </View>
             </View>
+            </View>
+            )}
           </>
-        ) : null}
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -348,7 +375,12 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
   },
   nodeSelector: {
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: borderRadius.md,
+    padding: spacing.sm,
     marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   selectorLabel: {
     ...typography.label,
@@ -364,7 +396,7 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   nodePillActive: {
-    backgroundColor: colors.primary,
+    backgroundColor: colors.primaryDark,
     borderColor: colors.primaryDark,
   },
   nodePillText: {
@@ -380,10 +412,13 @@ const styles = StyleSheet.create({
     borderRadius: borderRadius.md,
     padding: spacing.md,
     marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   fhiCard: {
     borderTopWidth: 4,
     borderTopColor: colors.primary,
+    backgroundColor: colors.surfaceElevated,
   },
   fhiHeader: {
     flexDirection: 'row',
@@ -459,6 +494,10 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     textAlign: 'center',
     marginBottom: spacing.md,
+  },
+  emptyCard: {
+    alignItems: 'center',
+    paddingVertical: spacing.xl,
   },
   retryBtn: {
     width: 160,
