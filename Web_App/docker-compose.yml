@@ -14,9 +14,10 @@ services:
       timeout: 5s
       retries: 10
 
-  backend:
+  app:
     build:
-      context: ./Backend
+      context: ..
+      dockerfile: Dockerfile
     restart: unless-stopped
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql://aqualora:aqualora123@postgres:5432/aqualora}
@@ -28,19 +29,8 @@ services:
         condition: service_healthy
     expose:
       - "8000"
-
-  frontend:
-    build:
-      context: ./Frontend
-      args:
-        VITE_API_URL: /api
-    restart: unless-stopped
-    environment:
-      PORT: ${PORT:-80}
-    depends_on:
-      - backend
     ports:
-      - "${PORT:-5174}:${PORT:-80}"
+      - "${PORT:-5174}:${CONTAINER_PORT:-8080}"
 
 volumes:
   postgres_data:

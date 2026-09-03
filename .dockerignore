@@ -1,0 +1,10 @@
+.git
+.github
+**/*.db
+**/.env
+**/node_modules
+**/dist
+**/__pycache__
+**/*.pyc
+mobile_application/android
+desktop_application/out
