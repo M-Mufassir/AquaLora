@@ -18,28 +18,35 @@ The **AquaLoRa Mobile App** is a cross-platform React Native / Expo application 
 ## 2. Setup & Execution
 
 ### Prerequisites
+
 - Node.js ≥ 20
 - Expo CLI: `npm install -g expo-cli`
 - Physical device with Expo Go **OR** Android Studio / iOS Simulator
 - Backend API running (locally or on Railway)
 
 ### Installation
+
 ```bash
 cd mobile_application
 npm install
 ```
 
 ### Configuration
+
 Edit `src/config.ts` if needed:
+
 ```typescript
-export const API_BASE_URL = 'https://aqualora.up.railway.app/api';
+export const API_BASE_URL = "https://aqualora.up.railway.app/api";
 ```
-*(For Android emulator accessing host localhost, use `http://10.0.2.2:8000`)*
+
+_(For Android emulator accessing host localhost, use `http://10.0.2.2:8000`)_
 
 ### Start App
+
 ```bash
 npm run start
 ```
+
 - Press `a` for Android emulator, `i` for iOS simulator, or scan the QR code with Expo Go.
 
 ---
