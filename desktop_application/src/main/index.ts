@@ -236,13 +236,14 @@ app.whenReady().then(() => {
   initDb()
 
   if (userCount() === 0) {
-    createUser('Admin', 'Admin123', 'admin')
-    console.log('[auth] default admin account created: username=Admin password=Admin123')
+    createUser('Operator', 'Operator123', 'operator')
+    console.log('[auth] default operator account created: username=Operator password=Operator123')
   }
 
-  ipcMain.handle('auth:login', (_event, username: string, password: string) =>
-    verifyUser(username, password)
-  )
+  ipcMain.handle('auth:login', (_event, username: string, password: string) => {
+    const user = verifyUser(username, password)
+    return user?.role === 'admin' ? null : user
+  })
 
   ipcMain.handle('readings:getRecent', (_event, nodeId: string, limit?: number) =>
     getRecentReadings(nodeId, limit)
@@ -368,7 +369,7 @@ app.whenReady().then(() => {
     const response = await fetch(loginUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ node_code: nodeCode, password })
+      body: JSON.stringify({ node_code: nodeCode, password, client: 'desktop' })
     })
 
     if (!response.ok) {
@@ -392,6 +393,13 @@ app.whenReady().then(() => {
       displayName: data.display_name,
       role: data.role,
       savedAt: new Date().toISOString()
+    }
+
+    if (!session.token) {
+      throw new Error('Authentication failed: No access token received from server.')
+    }
+    if (session.role === 'super_admin') {
+      throw new Error('Administrators must use the AquaLoRa web console.')
     }
 
     saveCloudSession(session)

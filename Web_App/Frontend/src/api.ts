@@ -18,4 +18,4 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
   return body as T
 }
 
-export const login = (node_code: string, password: string) => api<{ access_token: string; display_name: string; node_code: string; role: string }>('/auth/login', { method: 'POST', body: JSON.stringify({ node_code, password }) })
+export const login = (node_code: string, password: string) => api<{ access_token: string; display_name: string; node_code: string; role: string }>('/auth/login', { method: 'POST', body: JSON.stringify({ node_code, password, client: 'web' }) })

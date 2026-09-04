@@ -46,7 +46,7 @@ export function loadCloudSession(): CloudSessionData | null {
     }
 
     const data = JSON.parse(jsonStr) as CloudSessionData
-    if (!data.token || !data.nodeCode) return null
+    if (!data.token || !data.nodeCode || data.role === 'super_admin') return null
     return data
   } catch (err) {
     console.warn('[cloudSession] Failed to decrypt or parse cloud session:', err)

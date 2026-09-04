@@ -58,8 +58,8 @@ def test_directory_listing_public():
 def test_login_success_and_failure():
     client = TestClient(app)
 
-    # Success login with node_code
-    resp = client.post('/auth/login', json={'node_code': 'AQL-0001', 'password': 'TestAdmin123'})
+    # The web console accepts the seeded administrator.
+    resp = client.post('/auth/login', json={'node_code': 'AQL-0001', 'password': 'TestAdmin123', 'client': 'web'})
     assert resp.status_code == 200
     body = resp.json()
     assert 'access_token' in body
@@ -69,6 +69,30 @@ def test_login_success_and_failure():
     # Failed login with wrong password
     resp_fail = client.post('/auth/login', json={'node_code': 'AQL-0001', 'password': 'WrongPassword'})
     assert resp_fail.status_code == 401
+
+    # Administrators cannot use the mobile or desktop cloud clients.
+    mobile_admin = client.post('/auth/login', json={'node_code': 'AQL-0001', 'password': 'TestAdmin123', 'client': 'mobile'})
+    desktop_admin = client.post('/auth/login', json={'node_code': 'AQL-0001', 'password': 'TestAdmin123', 'client': 'desktop'})
+    assert mobile_admin.status_code == 403
+    assert desktop_admin.status_code == 403
+
+    # Customer credentials are rejected by the web console but accepted by clients.
+    customer = MasterNode(
+        node_code='AQL-0002',
+        display_name='Customer Facility',
+        password_hash=hash_password('CustomerPass123'),
+        role='customer',
+        status='active',
+    )
+    with Session(test_engine) as session:
+        session.add(customer)
+        session.commit()
+    web_customer = client.post('/auth/login', json={'node_code': 'AQL-0002', 'password': 'CustomerPass123', 'client': 'web'})
+    mobile_customer = client.post('/auth/login', json={'node_code': 'AQL-0002', 'password': 'CustomerPass123', 'client': 'mobile'})
+    desktop_customer = client.post('/auth/login', json={'node_code': 'AQL-0002', 'password': 'CustomerPass123', 'client': 'desktop'})
+    assert web_customer.status_code == 403
+    assert mobile_customer.status_code == 200
+    assert desktop_customer.status_code == 200
 
 
 def test_multi_tenant_data_isolation():

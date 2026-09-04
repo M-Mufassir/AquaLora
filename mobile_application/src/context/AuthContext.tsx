@@ -33,8 +33,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => {
     (async () => {
       const stored = await getStoredAuth();
-      setUser(stored.user);
-      setToken(stored.token);
+      if (stored.user?.role === 'super_admin') {
+        await apiLogout();
+        setUser(null);
+        setToken(null);
+      } else {
+        setUser(stored.user);
+        setToken(stored.token);
+      }
       setLoading(false);
     })();
   }, []);

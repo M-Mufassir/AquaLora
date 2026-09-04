@@ -35,7 +35,7 @@ export async function getDirectory(): Promise<DirectoryNode[]> {
 export async function login(nodeCode: string, password: string): Promise<AuthResponse> {
   const response = await axios.post(
     `${API_BASE_URL}/auth/login`,
-    { node_code: nodeCode.trim(), password },
+    { node_code: nodeCode.trim(), password, client: 'mobile' },
     { timeout: 8000 }
   );
   const rawData = response.data as BackendLoginResponse;
@@ -48,6 +48,9 @@ export async function login(nodeCode: string, password: string): Promise<AuthRes
 
   if (!token) {
     throw new Error('Authentication failed: No access token received from server.');
+  }
+  if (role === 'super_admin') {
+    throw new Error('Administrators must use the AquaLora web console.');
   }
 
   const authResponse: AuthResponse = {

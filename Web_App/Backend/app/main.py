@@ -30,6 +30,7 @@ class LoginRequest(BaseModel):
     node_code: str | None = None
     username: str | None = None  # fallback for legacy client callers
     password: str
+    client: str | None = None
 
 
 class LoginResponse(BaseModel):
@@ -234,6 +235,17 @@ def login(payload: LoginRequest) -> LoginResponse:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail='Invalid credentials',
+            )
+
+        if payload.client == 'web' and node.role != 'super_admin':
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail='The web console is restricted to administrators',
+            )
+        if payload.client in ('mobile', 'desktop') and node.role == 'super_admin':
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail='Administrators must use the web console',
             )
 
         token_str = create_token(
