@@ -96,6 +96,15 @@ export interface WifiConnectionState {
   ssid: string | null
 }
 
+export interface DiscoveredMasterNode {
+  id: string
+  ip: string
+  port: number
+  service?: string
+  mode?: 'STA' | 'AP'
+  lastSeen: string
+}
+
 export interface StoredReading {
   id: number
   node_id: string

@@ -53,6 +53,10 @@ function LoginScreen({ onLogin }: LoginScreenProps): React.JSX.Element {
         <button type="submit" className="login-submit-btn" disabled={submitting}>
           {submitting ? 'Signing in…' : 'Sign In'}
         </button>
+
+        <div style={{ marginTop: 14, padding: '8px 10px', borderRadius: 6, backgroundColor: 'rgba(56, 189, 248, 0.08)', border: '1px solid rgba(56, 189, 248, 0.2)', fontSize: 11, color: 'var(--ev-c-text-2)', textAlign: 'center' }}>
+          <span>Default Operator: <strong>Operator</strong> / <strong>Operator123</strong></span>
+        </div>
       </form>
     </div>
   )

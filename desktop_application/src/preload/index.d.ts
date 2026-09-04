@@ -9,6 +9,7 @@ import type {
   Settings,
   WifiNetwork,
   WifiConnectionState,
+  DiscoveredMasterNode,
   NodeListMessage
 } from '../shared/types'
 
@@ -42,6 +43,9 @@ interface AquaLoraApi {
   connectWifi: (ssid: string, password: string) => Promise<void>
   getWifiStatus: () => Promise<WifiConnectionState>
   openWifiSettings: () => Promise<void>
+  startDiscovery: () => Promise<void>
+  stopDiscovery: () => Promise<void>
+  onDeviceDiscovered: (callback: (device: DiscoveredMasterNode) => void) => () => void
   connectMasterNode: (url: string, password?: string) => Promise<void>
   onNodesDiscovered: (callback: (nodes: NodeListMessage['nodes']) => void) => () => void
   listUsers: () => Promise<UserRow[]>
@@ -63,6 +67,14 @@ interface AquaLoraApi {
   deleteNodeReadings: (nodeId: string) => Promise<number>
   deleteNode: (nodeId: string) => Promise<number>
   cloudLogin: (nodeCode: string, password: string) => Promise<{
+    token: string
+    masterNodeId: number
+    nodeCode: string
+    displayName: string
+    role: string
+    savedAt: string
+  }>
+  activateLocalSession: (nodeCode?: string) => Promise<{
     token: string
     masterNodeId: number
     nodeCode: string

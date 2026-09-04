@@ -54,6 +54,7 @@ import {
 import { MasterNodeClient } from './masterNodeClient'
 import { DecisionEngine } from './decisionEngine'
 import { scanNetworks, connectToNetwork, getCurrentConnection } from './wifiManager'
+import { startUdpDiscovery, stopUdpDiscovery, getDiscoveredDevices } from './udpDiscovery'
 import { deriveKeyFromPassword } from './secureChannel'
 import type { Score } from '../shared/types'
 
@@ -302,6 +303,17 @@ app.whenReady().then(() => {
     // lets the wizard fall back to "join it yourself, then continue".
     shell.openExternal('ms-settings:network-wifi')
   })
+  ipcMain.handle('discovery:start', () => {
+    startUdpDiscovery((device) => {
+      mainWindow?.webContents.send('discovery:device-found', device)
+    })
+    for (const device of getDiscoveredDevices()) {
+      mainWindow?.webContents.send('discovery:device-found', device)
+    }
+  })
+  ipcMain.handle('discovery:stop', () => {
+    stopUdpDiscovery()
+  })
   ipcMain.handle('master:connect', (_event, url: string, password?: string) => {
     setSetting('master_node_url', url)
     // No password means the dev-only "use local mock" path, or an
@@ -406,6 +418,20 @@ app.whenReady().then(() => {
     return session
   })
 
+  ipcMain.handle('cloud:activateLocal', (_event, nodeCode?: string) => {
+    const code = nodeCode?.trim() || 'master-node'
+    const session: CloudSessionData = {
+      token: 'local-offline-token',
+      masterNodeId: 1,
+      nodeCode: code,
+      displayName: code,
+      role: 'operator',
+      savedAt: new Date().toISOString()
+    }
+    saveCloudSession(session)
+    return session
+  })
+
   ipcMain.handle('cloud:logout', () => {
     clearCloudSession()
     return true
@@ -421,13 +447,23 @@ app.whenReady().then(() => {
   })
 
   ipcMain.handle('cloud:getDirectory', async () => {
-    const baseUrl = getSettingOptional('cloud_sync_url')?.trim() || 'http://localhost:8000'
-    const dirUrl = new URL('/master-nodes/directory', baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`).toString()
-    const response = await fetch(dirUrl)
-    if (!response.ok) {
-      throw new Error(`Failed to fetch directory: HTTP ${response.status}`)
+    try {
+      const baseUrl = getSettingOptional('cloud_sync_url')?.trim() || 'http://localhost:8000'
+      const dirUrl = new URL('/master-nodes/directory', baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`).toString()
+      const response = await fetch(dirUrl)
+      if (!response.ok) {
+        return []
+      }
+      const text = await response.text()
+      try {
+        return JSON.parse(text)
+      } catch {
+        return []
+      }
+    } catch (err: any) {
+      console.debug('[cloud:getDirectory] Directory fetch skipped:', err.message)
+      return []
     }
-    return await response.json()
   })
 
   ipcMain.handle('cloud:getProfile', async () => {
@@ -613,6 +649,12 @@ app.whenReady().then(() => {
       }
     })
   })
+  // Start background UDP discovery immediately so local ESP32 Master Nodes are detected on boot
+  startUdpDiscovery((device) => {
+    console.log(`[udpDiscovery] Discovered Master Node: ${device.id} at ${device.ip}:${device.port}`)
+    mainWindow?.webContents.send('discovery:device-found', device)
+  })
+
   // Only auto-connect if the user has actually paired with a Master Node
   // before (via the Connect Device wizard) — otherwise a fresh install, or
   // one that's never been paired, would silently dial the dev mock (if one

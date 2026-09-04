@@ -24,6 +24,7 @@ function CloudActivationScreen({ onActivated }: CloudActivationScreenProps): Rea
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [manualEntry, setManualEntry] = useState(false)
+  const [discoveredDevice, setDiscoveredDevice] = useState<{ id: string; ip: string; port: number } | null>(null)
 
   async function fetchDirectory(): Promise<void> {
     setLoadingDirectory(true)
@@ -36,7 +37,6 @@ function CloudActivationScreen({ onActivated }: CloudActivationScreenProps): Rea
       }
     } catch (err: any) {
       console.warn('[CloudActivation] Directory fetch failed:', err)
-      setError('Unable to load cloud Master Node directory. Check network or enter manually.')
       setManualEntry(true)
     } finally {
       setLoadingDirectory(false)
@@ -45,6 +45,17 @@ function CloudActivationScreen({ onActivated }: CloudActivationScreenProps): Rea
 
   useEffect(() => {
     void fetchDirectory()
+
+    // Listen for local UDP discovered ESP32 devices to auto-derive node name
+    window.api.startDiscovery().catch(() => {})
+    const unsub = window.api.onDeviceDiscovered((dev) => {
+      setDiscoveredDevice({ id: dev.id, ip: dev.ip, port: dev.port })
+      setCustomNodeCode((prev) => (prev ? prev : dev.id))
+    })
+
+    return () => {
+      unsub()
+    }
   }, [])
 
   async function handleSubmit(e: React.FormEvent): Promise<void> {
@@ -65,7 +76,28 @@ function CloudActivationScreen({ onActivated }: CloudActivationScreenProps): Rea
       const session = await window.api.cloudLogin(targetCode, password)
       onActivated(session)
     } catch (err: any) {
-      setError(err?.message || 'Activation failed. Please check credentials and backend connection.')
+      setError(
+        err?.message ||
+          'Cloud activation failed. If your cloud backend is offline, you can click "Continue in Offline / Local Mode" below.'
+      )
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  async function handleLocalOfflineMode(): Promise<void> {
+    setError(null)
+    setSubmitting(true)
+    try {
+      const nodeName = customNodeCode.trim() || discoveredDevice?.id || 'master-node'
+      const session = await window.api.activateLocalSession(nodeName)
+      if (discoveredDevice?.ip) {
+        const wsUrl = `ws://${discoveredDevice.ip}:${discoveredDevice.port || 8081}`
+        await window.api.connectMasterNode(wsUrl, password || 'aqualora123').catch(() => {})
+      }
+      onActivated(session)
+    } catch (err: any) {
+      setError(err?.message || 'Failed to initialize local mode.')
     } finally {
       setSubmitting(false)
     }
@@ -73,7 +105,7 @@ function CloudActivationScreen({ onActivated }: CloudActivationScreenProps): Rea
 
   return (
     <div className="login-screen">
-      <form className="login-form" onSubmit={handleSubmit} style={{ width: 340 }}>
+      <form className="login-form" onSubmit={handleSubmit} style={{ width: 360 }}>
         <div style={{ textAlign: 'center', marginBottom: 4 }}>
           <span style={{ fontSize: 32 }}>🌊</span>
         </div>
@@ -82,7 +114,51 @@ function CloudActivationScreen({ onActivated }: CloudActivationScreenProps): Rea
           Activate this workstation for your AquaLoRa facility (one-time setup)
         </p>
 
-        {error && <p className="login-error" style={{ marginBottom: 6 }}>{error}</p>}
+        {/* Auto-discovered node banner */}
+        {discoveredDevice && (
+          <div
+            style={{
+              padding: '10px 12px',
+              borderRadius: 6,
+              backgroundColor: 'rgba(56, 189, 248, 0.12)',
+              border: '1px solid rgba(56, 189, 248, 0.35)',
+              marginBottom: 12,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between'
+            }}
+          >
+            <div>
+              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-primary, #38bdf8)' }}>
+                ⚡ Local Node Found: {discoveredDevice.id}
+              </span>
+              <p style={{ margin: '2px 0 0', fontSize: 11, color: 'var(--ev-c-text-2)' }}>
+                IP: {discoveredDevice.ip}:{discoveredDevice.port || 8081}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setCustomNodeCode(discoveredDevice.id)
+                setManualEntry(true)
+              }}
+              style={{
+                background: 'var(--color-primary, #38bdf8)',
+                color: '#fff',
+                border: 'none',
+                borderRadius: 4,
+                padding: '4px 8px',
+                fontSize: 11,
+                cursor: 'pointer',
+                fontWeight: 600
+              }}
+            >
+              Auto-fill
+            </button>
+          </div>
+        )}
+
+        {error && <p className="login-error" style={{ marginBottom: 10 }}>{error}</p>}
 
         {!manualEntry && nodes.length > 0 ? (
           <>
@@ -144,7 +220,7 @@ function CloudActivationScreen({ onActivated }: CloudActivationScreenProps): Rea
         ) : (
           <>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <label htmlFor="custom-node-code">Master Node Code</label>
+              <label htmlFor="custom-node-code">Master Node Code / ID</label>
               {nodes.length > 0 && (
                 <button
                   type="button"
@@ -165,9 +241,9 @@ function CloudActivationScreen({ onActivated }: CloudActivationScreenProps): Rea
             <input
               id="custom-node-code"
               type="text"
-              placeholder="e.g. AQL-0001"
+              placeholder="e.g. master-node or AQL-001"
               value={customNodeCode}
-              onChange={(e) => setCustomNodeCode(e.target.value.toUpperCase())}
+              onChange={(e) => setCustomNodeCode(e.target.value)}
               autoFocus
               required
             />
@@ -178,7 +254,7 @@ function CloudActivationScreen({ onActivated }: CloudActivationScreenProps): Rea
         <input
           id="activation-password"
           type="password"
-          placeholder="Enter password"
+          placeholder="Enter password (default: aqualora123)"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           required
@@ -192,6 +268,26 @@ function CloudActivationScreen({ onActivated }: CloudActivationScreenProps): Rea
         >
           {submitting ? 'Authenticating…' : 'Activate Workstation'}
         </button>
+
+        <div style={{ marginTop: 12, textAlign: 'center' }}>
+          <button
+            type="button"
+            onClick={handleLocalOfflineMode}
+            disabled={submitting}
+            style={{
+              background: 'none',
+              border: '1px solid var(--color-border, #444)',
+              borderRadius: 6,
+              color: 'var(--ev-c-text-1)',
+              padding: '6px 12px',
+              fontSize: 12,
+              cursor: 'pointer',
+              width: '100%'
+            }}
+          >
+            ⚡ Continue in Offline / Local Mode (Skip Cloud)
+          </button>
+        </div>
 
         <p style={{ fontSize: 11, color: 'var(--ev-c-text-3, #888)', textAlign: 'center', margin: '8px 0 0' }}>
           This links telemetry and cloud sync securely to your facility.

@@ -25,6 +25,7 @@
 // See README.md (this folder) for setup steps.
 
 #include <WiFi.h>
+#include <WiFiUdp.h>
 #include <WebSocketsServer.h>
 #include <ArduinoJson.h>
 #include <time.h>
@@ -37,15 +38,15 @@
 // The ESP32 can run in two modes:
 //   1) AP mode: it starts its own WiFi access point, which matches the
 //      original pairing flow used by the dashboard.
-//   2) STA mode: it joins an existing external WiFi router, and the
-//      dashboard connects directly to the ESP32's assigned IP address on the
-//      LAN instead of 192.168.4.1.
-// Set USE_EXTERNAL_WIFI to 1 when the Master Node should join a router.
-// The dashboard will then connect to ws://<ESP32_IP>:8081 instead of the AP
-// gateway. -----------------------------------------------------------------
-#define USE_EXTERNAL_WIFI 0
-#define EXTERNAL_WIFI_SSID "YourRouterSSID"
-#define EXTERNAL_WIFI_PASSWORD "YourRouterPassword"
+//   2) STA mode: it joins an existing external WiFi router / mobile hotspot,
+//      and the dashboard connects directly to the ESP32's assigned IP address
+//      on the LAN via automatic UDP discovery on port 8082.
+// Set USE_EXTERNAL_WIFI to 1 when the Master Node should join a router/hotspot.
+// If the hotspot is not reachable within 20s, it automatically falls back to AP mode.
+// --------------------------------------------------------------------------
+#define USE_EXTERNAL_WIFI 1
+#define EXTERNAL_WIFI_SSID "Aqualora"
+#define EXTERNAL_WIFI_PASSWORD "Aqualora"
 
 // ---- WiFi AP config — used as the fallback if external WiFi is unavailable
 // or disabled. This password is also the encryption pairing secret (see the
@@ -54,6 +55,12 @@
 static const char *AP_SSID = "AquaLoRa-MasterNode";
 static const char *AP_PASSWORD = "aqualora123"; // WPA2 min length is 8 chars
 static const uint16_t WS_PORT = 8081;           // matches mock_master_node.js
+static const uint16_t UDP_DISCOVERY_PORT = 8082; // matches desktop udpDiscovery listener
+static const unsigned long UDP_BROADCAST_INTERVAL_MS = 3000;
+
+static WiFiUDP udpDiscovery;
+static unsigned long lastUdpBroadcastMs = 0;
+static bool isApFallbackActive = false;
 
 // ---- Dummy sensor node profiles — same tuned ranges as
 // mock_master_node.js, so Fish Health Index status tiers still demo
@@ -331,6 +338,44 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t *payload, size_t length)
   }
 }
 
+static String getCurrentIPString()
+{
+  if (WiFi.getMode() & WIFI_STA && WiFi.status() == WL_CONNECTED)
+    return WiFi.localIP().toString();
+  return WiFi.softAPIP().toString();
+}
+
+static void broadcastPresence()
+{
+  IPAddress broadcastIp;
+  if ((WiFi.getMode() & WIFI_AP) && !isApFallbackActive)
+  {
+    broadcastIp = IPAddress(192, 168, 4, 255);
+  }
+  else
+  {
+    broadcastIp = IPAddress(255, 255, 255, 255);
+  }
+
+  StaticJsonDocument<256> doc;
+  doc["service"] = "aqualora-master";
+  doc["id"] = "master-node";
+  doc["code"] = "AQL-001";
+  doc["ip"] = getCurrentIPString();
+  doc["port"] = WS_PORT;
+  doc["mode"] = (WiFi.status() == WL_CONNECTED) ? "STA" : "AP";
+
+  String jsonStr;
+  serializeJson(doc, jsonStr);
+
+  udpDiscovery.beginPacket(broadcastIp, UDP_DISCOVERY_PORT);
+  udpDiscovery.write((const uint8_t *)jsonStr.c_str(), jsonStr.length());
+  udpDiscovery.endPacket();
+
+  Serial.printf("[discovery] UDP broadcast sent -> %s:%u (IP: %s)\n",
+                broadcastIp.toString().c_str(), UDP_DISCOVERY_PORT, getCurrentIPString().c_str());
+}
+
 void setup()
 {
   Serial.begin(115200);
@@ -340,6 +385,7 @@ void setup()
 
 #if USE_EXTERNAL_WIFI
   WiFi.mode(WIFI_STA);
+  WiFi.setSleep(false);
   WiFi.begin(EXTERNAL_WIFI_SSID, EXTERNAL_WIFI_PASSWORD);
   Serial.printf("[master] connecting to external WiFi: %s\n", EXTERNAL_WIFI_SSID);
 
@@ -351,11 +397,13 @@ void setup()
 
   if (WiFi.status() == WL_CONNECTED)
   {
+    isApFallbackActive = false;
     Serial.print("[master] external WiFi connected, IP: ");
     Serial.println(WiFi.localIP());
   }
   else
   {
+    isApFallbackActive = true;
     Serial.println("[master] external WiFi failed — falling back to AP mode");
     WiFi.mode(WIFI_AP);
     WiFi.softAP(AP_SSID, AP_PASSWORD);
@@ -365,6 +413,7 @@ void setup()
     Serial.println(WiFi.softAPIP());
   }
 #else
+  isApFallbackActive = false;
   WiFi.mode(WIFI_AP);
   WiFi.softAP(AP_SSID, AP_PASSWORD);
   Serial.print("[master] AP started, SSID: ");
@@ -372,6 +421,9 @@ void setup()
   Serial.print("[master] AP IP address: ");
   Serial.println(WiFi.softAPIP()); // normally 192.168.4.1
 #endif
+
+  udpDiscovery.begin(UDP_DISCOVERY_PORT);
+  Serial.printf("[master] UDP Discovery broadcasting on port %u\n", UDP_DISCOVERY_PORT);
 
   webSocket.begin();
   webSocket.onEvent(webSocketEvent);
@@ -383,6 +435,14 @@ void loop()
   webSocket.loop();
 
   unsigned long now = millis();
+
+  // Periodically broadcast UDP discovery beacon (every 3 seconds)
+  if (now - lastUdpBroadcastMs >= UDP_BROADCAST_INTERVAL_MS)
+  {
+    lastUdpBroadcastMs = now;
+    broadcastPresence();
+  }
+
   for (int i = 0; i < NODE_COUNT; i++)
   {
     if (now - lastSendMs[i] >= samplingIntervalMs)

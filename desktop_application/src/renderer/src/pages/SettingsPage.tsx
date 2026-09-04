@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useReadingsStore } from '../store/useReadingsStore'
 import ThemeToggle from '../components/ThemeToggle'
 import {
@@ -26,6 +27,7 @@ const EMPTY_PROFILE: PondThresholdProfile = {
 }
 
 function SettingsPage(): React.JSX.Element {
+  const navigate = useNavigate()
   const settings = useReadingsStore((s) => s.settings)
   const knownNodes = useReadingsStore((s) => s.knownNodes)
   const removeNode = useReadingsStore((s) => s.removeNode)
@@ -585,6 +587,40 @@ function SettingsPage(): React.JSX.Element {
             <span className={`status-pill ${currentWifiSsid ? 'online' : 'offline'}`}>
               {currentWifiSsid ? 'Connected' : 'Not connected'}
             </span>
+          </div>
+
+          {/* Quick link to automatic discovery wizard */}
+          <div
+            style={{
+              padding: '14px 18px',
+              borderRadius: '8px',
+              backgroundColor: 'rgba(74, 168, 255, 0.08)',
+              border: '1px solid rgba(74, 168, 255, 0.25)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              marginBottom: '16px'
+            }}
+          >
+            <div>
+              <strong style={{ color: 'var(--ev-c-text-1)', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                📡 Automatic Device Discovery
+              </strong>
+              <p style={{ margin: '4px 0 0', fontSize: '12px', color: 'var(--ev-c-text-2)' }}>
+                Scan local Wi-Fi networks and automatically discover your ESP32 Master Node via UDP without typing IP addresses.
+              </p>
+            </div>
+            <button
+              className="apply-btn"
+              onClick={() => navigate('/connect')}
+              style={{
+                fontWeight: 600,
+                padding: '8px 16px',
+                cursor: 'pointer'
+              }}
+            >
+              Launch Discovery Wizard →
+            </button>
           </div>
 
           <div className="connection-summary-grid">

@@ -10,6 +10,7 @@ import type {
   Settings,
   WifiNetwork,
   WifiConnectionState,
+  DiscoveredMasterNode,
   NodeListMessage,
   CloudSyncStatus
 } from '../shared/types'
@@ -92,6 +93,14 @@ const api = {
     ipcRenderer.invoke('wifi:connect', ssid, password),
   getWifiStatus: (): Promise<WifiConnectionState> => ipcRenderer.invoke('wifi:status'),
   openWifiSettings: (): Promise<void> => ipcRenderer.invoke('wifi:openSettings'),
+  startDiscovery: (): Promise<void> => ipcRenderer.invoke('discovery:start'),
+  stopDiscovery: (): Promise<void> => ipcRenderer.invoke('discovery:stop'),
+  onDeviceDiscovered: (callback: (device: DiscoveredMasterNode) => void): (() => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, device: DiscoveredMasterNode): void =>
+      callback(device)
+    ipcRenderer.on('discovery:device-found', listener)
+    return () => ipcRenderer.removeListener('discovery:device-found', listener)
+  },
   connectMasterNode: (url: string, password?: string): Promise<void> =>
     ipcRenderer.invoke('master:connect', url, password),
   onNodesDiscovered: (callback: (nodes: NodeListMessage['nodes']) => void): (() => void) => {
@@ -131,6 +140,8 @@ const api = {
   deleteNode: (nodeId: string): Promise<number> => ipcRenderer.invoke('nodes:delete', nodeId),
   cloudLogin: (nodeCode: string, password: string): Promise<any> =>
     ipcRenderer.invoke('cloud:login', nodeCode, password),
+  activateLocalSession: (nodeCode?: string): Promise<any> =>
+    ipcRenderer.invoke('cloud:activateLocal', nodeCode),
   cloudLogout: (): Promise<boolean> => ipcRenderer.invoke('cloud:logout'),
   getCloudSession: (): Promise<any> => ipcRenderer.invoke('cloud:getSession'),
   validateCloudSession: (): Promise<boolean> => ipcRenderer.invoke('cloud:validateSession'),

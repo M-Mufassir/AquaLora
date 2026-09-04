@@ -157,6 +157,12 @@ function App(): React.JSX.Element {
           >
             Settings
           </NavLink>
+          <NavLink
+            to="/connect"
+            className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
+          >
+            Connect Device
+          </NavLink>
           <div className="nav-spacer" />
 
           {/* Master Node Link Status */}
