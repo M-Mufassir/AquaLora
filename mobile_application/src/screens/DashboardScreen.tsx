@@ -8,19 +8,22 @@ import {
   ScrollView,
   RefreshControl,
   TouchableOpacity,
-  SafeAreaView,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AuthContext } from '../context/AuthContext';
 import { apiService, APIError } from '../services/apiService';
 import { getNodes } from '../services/authService';
 import { Reading, NodeConfig, PondThresholdProfile, getEffectiveProfile } from '../shared/types';
 import { colors, borderRadius, spacing, typography, shadows } from '../theme';
-import { Gauge, StatusBar, SkeletonLoader, Button } from '../components';
+import { Gauge, StatusBar, SkeletonLoader, Button, MiniTrendChart } from '../components';
 import { saveCache, getCache, CACHE_KEYS } from '../services/cacheService';
 
 export const DashboardScreen = () => {
+  const insets = useSafeAreaInsets();
   const { loading: authLoading, user } = useContext(AuthContext);
   const [readings, setReadings] = useState<Reading[]>([]);
+  const [historyReadings, setHistoryReadings] = useState<Reading[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [nodeConfigs, setNodeConfigs] = useState<Record<string, NodeConfig>>({});
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -41,6 +44,32 @@ export const DashboardScreen = () => {
     }
   }, []);
 
+  const fetchHistory = useCallback(async (nodeId?: string | null) => {
+    setHistoryLoading(true);
+    try {
+      const now = new Date();
+      const start = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
+      const params: any = {
+        start,
+        end: now.toISOString(),
+        limit: 50,
+      };
+      if (nodeId) params.node_id = nodeId;
+      const data = await apiService.get<Reading[]>('/readings/history', params);
+      const hist = Array.isArray(data) ? data : [data];
+      const sorted = [...hist].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+      setHistoryReadings(sorted);
+    } catch (err) {
+      console.warn('[Dashboard] Could not fetch past history:', err);
+      const cached = await getCache<Reading[]>(CACHE_KEYS.HISTORY);
+      if (cached && cached.data.length > 0) {
+        setHistoryReadings(cached.data);
+      }
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, []);
+
   const fetchReadings = useCallback(async (isRefresh = false) => {
     if (!isRefresh) setLoading(true);
     try {
@@ -50,7 +79,11 @@ export const DashboardScreen = () => {
       await saveCache(CACHE_KEYS.READINGS, readingsArray);
 
       if (readingsArray.length > 0) {
-        setSelectedNodeId(prev => (prev && readingsArray.some(r => r.node_id === prev) ? prev : readingsArray[0].node_id));
+        const nextNode = selectedNodeId && readingsArray.some(r => r.node_id === selectedNodeId)
+          ? selectedNodeId
+          : readingsArray[0].node_id;
+        setSelectedNodeId(nextNode);
+        fetchHistory(nextNode);
       }
       setError(null);
       setIsOfflineMode(false);
@@ -59,7 +92,10 @@ export const DashboardScreen = () => {
       const cached = await getCache<Reading[]>(CACHE_KEYS.READINGS);
       if (cached && cached.data.length > 0) {
         setReadings(cached.data);
-        if (!selectedNodeId) setSelectedNodeId(cached.data[0].node_id);
+        if (!selectedNodeId) {
+          setSelectedNodeId(cached.data[0].node_id);
+          fetchHistory(cached.data[0].node_id);
+        }
         setError(`Offline Mode — Showing cached data from ${new Date(cached.timestamp).toLocaleTimeString()}`);
         setIsOfflineMode(true);
       } else {
@@ -69,7 +105,7 @@ export const DashboardScreen = () => {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [selectedNodeId]);
+  }, [selectedNodeId, fetchHistory]);
 
   useEffect(() => {
     if (!authLoading) {
@@ -78,9 +114,15 @@ export const DashboardScreen = () => {
     }
   }, [authLoading]);
 
+  // When user clicks a different node pill, fetch its past history automatically
+  const handleSelectNode = (nodeId: string) => {
+    setSelectedNodeId(nodeId);
+    fetchHistory(nodeId);
+  };
+
   const handleRefresh = async () => {
     setRefreshing(true);
-    await Promise.all([fetchNodeConfigs(), fetchReadings(true)]);
+    await Promise.all([fetchNodeConfigs(), fetchReadings(true), fetchHistory(selectedNodeId)]);
   };
 
   const currentReading = selectedNodeId
@@ -129,7 +171,7 @@ export const DashboardScreen = () => {
 
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <View style={[styles.safeArea, { paddingTop: insets.top }]}>
       {/* Header Bar */}
       <View style={styles.header}>
         <View>
@@ -194,7 +236,7 @@ export const DashboardScreen = () => {
                         styles.nodePill,
                         selectedNodeId === nodeId && styles.nodePillActive,
                       ]}
-                      onPress={() => setSelectedNodeId(nodeId)}
+                      onPress={() => handleSelectNode(nodeId)}
                     >
                       <Text
                         style={[
@@ -289,6 +331,9 @@ export const DashboardScreen = () => {
               precision={1}
             />
 
+            {/* 24-Hour Telemetry Trend Chart */}
+            <MiniTrendChart readings={historyReadings} loading={historyLoading} />
+
             {/* System Telemetry & Signal Health Card */}
             <View style={[styles.card, shadows.medium]}>
               <Text style={styles.cardTitle}>Node Telemetry & Signal</Text>
@@ -316,7 +361,7 @@ export const DashboardScreen = () => {
           </>
         )}
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 };
 

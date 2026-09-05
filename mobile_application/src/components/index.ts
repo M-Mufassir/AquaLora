@@ -7,3 +7,4 @@ export * from './AlertBadge';
 export * from './StatusBar';
 export * from './SkeletonLoader';
 export * from './ConfirmationModal';
+export * from './MiniTrendChart';

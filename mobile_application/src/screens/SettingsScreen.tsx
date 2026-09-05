@@ -7,11 +7,11 @@ import {
   TextInput,
   StyleSheet,
   ScrollView,
-  SafeAreaView,
   TouchableOpacity,
   Alert,
   ActivityIndicator,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AuthContext } from '../context/AuthContext';
 import { API_BASE_URL } from '../config';
 import { apiService } from '../services/apiService';
@@ -126,6 +126,7 @@ const srStyles = StyleSheet.create({
 const POND_TYPES: PondType[] = ['tilapia', 'prawn', 'catfish', 'tuna', 'salmon', 'general'];
 
 export const SettingsScreen = () => {
+  const insets = useSafeAreaInsets();
   const { user, logout } = useContext(AuthContext);
 
   // Server config state
@@ -278,7 +279,7 @@ export const SettingsScreen = () => {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <View style={[styles.safeArea, { paddingTop: insets.top }]}>
       <View style={styles.header}>
         <Text style={styles.title}>System Settings</Text>
         <Text style={styles.subtitle}>App Configuration & Account Management</Text>
@@ -593,7 +594,7 @@ export const SettingsScreen = () => {
         onCancel={() => setLogoutModalVisible(false)}
         loading={loggingOut}
       />
-    </SafeAreaView>
+    </View>
   );
 };
 

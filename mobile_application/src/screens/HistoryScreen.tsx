@@ -7,10 +7,10 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  SafeAreaView,
   RefreshControl,
   Alert,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { apiService } from '../services/apiService';
 import { Reading } from '../shared/types';
 import { colors, borderRadius, spacing, typography, shadows } from '../theme';
@@ -39,6 +39,7 @@ const METRICS: MetricConfig[] = [
 import { saveCache, getCache, CACHE_KEYS } from '../services/cacheService';
 
 export const HistoryScreen = () => {
+  const insets = useSafeAreaInsets();
   const [selectedMetric, setSelectedMetric] = useState<MetricType>('temperature');
   const [selectedPeriod, setSelectedPeriod] = useState<PeriodType>('24h');
   const [readings, setReadings] = useState<Reading[]>([]);
@@ -123,7 +124,7 @@ export const HistoryScreen = () => {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <View style={[styles.safeArea, { paddingTop: insets.top }]}>
       {/* Screen Title Header */}
       <View style={styles.header}>
         <Text style={styles.title}>Historical Telemetry</Text>
@@ -253,7 +254,7 @@ export const HistoryScreen = () => {
           </>
         )}
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 };
 

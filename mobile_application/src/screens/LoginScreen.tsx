@@ -15,6 +15,7 @@ import {
   ImageBackground,
   Image,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AuthContext } from '../context/AuthContext';
 import { getDirectory, DirectoryNode } from '../services/authService';
 import { colors, borderRadius, spacing, typography, shadows } from '../theme';
@@ -24,6 +25,7 @@ const splashBg = require('../../assets/splash.jpg');
 const appIcon = require('../../assets/Logo.png');
 
 export const LoginScreen = () => {
+  const insets = useSafeAreaInsets();
   const [nodes, setNodes] = useState<DirectoryNode[]>([]);
   const [selectedNode, setSelectedNode] = useState<DirectoryNode | null>(null);
   const [manualCode, setManualCode] = useState('');
@@ -91,7 +93,10 @@ export const LoginScreen = () => {
         style={styles.kbView}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+        <ScrollView
+          contentContainerStyle={[styles.scrollContent, { paddingTop: Math.max(insets.top + 16, spacing.xl) }]}
+          keyboardShouldPersistTaps="handled"
+        >
           {/* Branding Header */}
           <View style={styles.header}>
             <Image source={appIcon} style={styles.logoImage} resizeMode="contain" />

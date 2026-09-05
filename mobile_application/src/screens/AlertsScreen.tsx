@@ -8,10 +8,10 @@ import {
   ScrollView,
   RefreshControl,
   TouchableOpacity,
-  SafeAreaView,
   Modal,
   TouchableWithoutFeedback,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { apiService, APIError } from '../services/apiService';
 import { Alert, AlertSeverity } from '../shared/types';
 import { colors, borderRadius, spacing, typography, shadows } from '../theme';
@@ -22,6 +22,7 @@ type SeverityFilter = 'all' | 'critical' | 'warning' | 'normal';
 import { saveCache, getCache, CACHE_KEYS } from '../services/cacheService';
 
 export const AlertsScreen = () => {
+  const insets = useSafeAreaInsets();
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -88,7 +89,7 @@ export const AlertsScreen = () => {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <View style={[styles.safeArea, { paddingTop: insets.top }]}>
       {/* Header Bar */}
       <View style={styles.header}>
         <View>
@@ -212,7 +213,7 @@ export const AlertsScreen = () => {
           </TouchableWithoutFeedback>
         </Modal>
       ) : null}
-    </SafeAreaView>
+    </View>
   );
 };
 

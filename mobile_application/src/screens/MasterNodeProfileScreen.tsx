@@ -1,4 +1,3 @@
-// src/screens/MasterNodeProfileScreen.tsx
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -10,11 +9,13 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getProfile, updateProfile, changePassword } from '../services/authService';
 import { colors, borderRadius, spacing, typography, shadows } from '../theme';
 import { Button } from '../components';
 
 export const MasterNodeProfileScreen = () => {
+  const insets = useSafeAreaInsets();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [nodeData, setNodeData] = useState<any>(null);
@@ -115,7 +116,7 @@ export const MasterNodeProfileScreen = () => {
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
+    <ScrollView style={[styles.container, { paddingTop: insets.top }]} contentContainerStyle={styles.scrollContent}>
       {/* Header Info */}
       <View style={[styles.headerCard, shadows.small]}>
         <View style={styles.headerRow}>
