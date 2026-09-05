@@ -82,6 +82,25 @@ interface AquaLoraApi {
     role: string
     savedAt: string
   }>
+  setupMasterNodeSession: (payload: {
+    nodeCode: string
+    displayName?: string
+    password?: string
+    wsUrl: string
+    cloudUrl?: string
+  }) => Promise<{
+    session: {
+      token: string
+      masterNodeId: number
+      nodeCode: string
+      displayName: string
+      role: string
+      savedAt: string
+    }
+    user: { username: string; role: string }
+    cloudSynced: boolean
+    message?: string
+  }>
   cloudLogout: () => Promise<boolean>
   getCloudSession: () => Promise<{
     token: string
@@ -126,6 +145,7 @@ interface AquaLoraApi {
     custom_profile: any
     updated_at: string | null
   }>>
+  resetLocalNodeData: () => Promise<{ nodes: number; readings: number; alerts: number; outbox: number }>
 }
 
 declare global {

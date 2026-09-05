@@ -156,6 +156,25 @@ export function initDb(): Database.Database {
   return db
 }
 
+/**
+ * Wipe all node-specific telemetry data (readings, nodes, alerts, sync outbox)
+ * so the desktop can onboard a brand-new Master Node cleanly.
+ * Settings, users, and threshold profiles are preserved.
+ */
+export function resetLocalNodeData(): { nodes: number; readings: number; alerts: number; outbox: number } {
+  const tx = db.transaction(() => {
+    const nodes = (db.prepare('DELETE FROM nodes').run()).changes
+    const readings = (db.prepare('DELETE FROM readings').run()).changes
+    const alerts = (db.prepare('DELETE FROM alerts').run()).changes
+    const outboxReadings = (db.prepare('DELETE FROM outbox').run()).changes
+    const outboxAlerts = (db.prepare('DELETE FROM alert_outbox').run()).changes
+    return { nodes, readings, alerts, outbox: outboxReadings + outboxAlerts }
+  })
+  const result = tx()
+  console.log('[db] resetLocalNodeData:', result)
+  return result
+}
+
 export function upsertNodeFromReading(reading: Reading): NodeRow {
   db.prepare(
     `INSERT INTO nodes (id, last_seen, battery_pct, lora_rssi, status)
@@ -403,6 +422,15 @@ export function createUser(username: string, password: string, role = 'operator'
     passwordHash,
     role
   )
+}
+
+export function upsertUser(username: string, password: string, role = 'operator'): void {
+  const passwordHash = bcrypt.hashSync(password, SALT_ROUNDS)
+  db.prepare(`
+    INSERT INTO users (username, password_hash, role)
+    VALUES (?, ?, ?)
+    ON CONFLICT(username) DO UPDATE SET password_hash = excluded.password_hash, role = excluded.role
+  `).run(username, passwordHash, role)
 }
 
 export function verifyUser(

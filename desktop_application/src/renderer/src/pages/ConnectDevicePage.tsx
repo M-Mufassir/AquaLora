@@ -2,9 +2,14 @@ import { useEffect, useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { WifiNetwork, DiscoveredMasterNode } from '../../../shared/types'
 
-type WizardStep = 'wifi' | 'discovery' | 'login'
+type WizardStep = 'wifi' | 'login'
 
-function ConnectDevicePage(): React.JSX.Element {
+interface ConnectDevicePageProps {
+  onComplete?: (session: any, user: { username: string; role: string }) => void
+  isOnboarding?: boolean
+}
+
+function ConnectDevicePage({ onComplete, isOnboarding = false }: ConnectDevicePageProps): React.JSX.Element {
   const navigate = useNavigate()
 
   const [step, setStep] = useState<WizardStep>('wifi')
@@ -18,25 +23,46 @@ function ConnectDevicePage(): React.JSX.Element {
   const [isConnectingWifi, setIsConnectingWifi] = useState(false)
   const [wifiError, setWifiError] = useState<string | null>(null)
 
-  // Step 2: Discovery state
+  // Step 2: Auto-derived Node & Sign-In state
   const [discoveredDevices, setDiscoveredDevices] = useState<DiscoveredMasterNode[]>([])
   const [selectedDevice, setSelectedDevice] = useState<DiscoveredMasterNode | null>(null)
-  const [manualIp, setManualIp] = useState('')
-  const [showManualInput, setShowManualInput] = useState(false)
-
-  // Step 3: Pairing / Login state
+  const [nodeCode, setNodeCode] = useState('master-node')
+  const [displayName, setDisplayName] = useState('AquaLoRa Master Node')
+  const [nodeWsUrl, setNodeWsUrl] = useState('ws://10.41.47.240:8081')
   const [pairingPassword, setPairingPassword] = useState('aqualora123')
+  const [cloudUrl, setCloudUrl] = useState('')
+  const [showAdvanced, setShowAdvanced] = useState(false)
+
   const [isConnectingDevice, setIsConnectingDevice] = useState(false)
+  const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [connectError, setConnectError] = useState<string | null>(null)
   const [connectSuccess, setConnectSuccess] = useState(false)
+  const [isNewNodeWarning, setIsNewNodeWarning] = useState(false)
+  const [previousNodeCode, setPreviousNodeCode] = useState<string | null>(null)
 
   const unsubscribeDiscoveryRef = useRef<(() => void) | null>(null)
 
-  // On mount: check current Wi-Fi status, scan networks, and start discovery listener
+  // On mount: check current Wi-Fi status, scan networks, start UDP discovery
   useEffect(() => {
     checkWifiStatus()
     scanWifiNetworks()
     startDiscoveryListener()
+
+    // Check if there's an existing paired node
+    window.api.getCloudSession().then((session) => {
+      if (session?.nodeCode) {
+        setPreviousNodeCode(session.nodeCode)
+      }
+    })
+
+    window.api.getSettings().then((settings) => {
+      if (settings.cloudSyncUrl) {
+        setCloudUrl(settings.cloudSyncUrl)
+      }
+      if (settings.masterNodeUrl) {
+        setNodeWsUrl(settings.masterNodeUrl)
+      }
+    })
 
     return () => {
       if (unsubscribeDiscoveryRef.current) {
@@ -64,8 +90,22 @@ function ConnectDevicePage(): React.JSX.Element {
         return [...prev, device]
       })
 
-      // Automatically select if it's the first discovered device
-      setSelectedDevice((prev) => prev ?? device)
+      // Auto-select first discovered device and auto-derive form fields
+      setSelectedDevice((prev) => {
+        if (!prev) {
+          setNodeCode(device.id)
+          setNodeWsUrl(`ws://${device.ip}:${device.port || 8081}`)
+          // Check if this is a different node from what was previously paired
+          setPreviousNodeCode((prevCode) => {
+            if (prevCode && prevCode !== device.id) {
+              setIsNewNodeWarning(true)
+            }
+            return prevCode
+          })
+          return device
+        }
+        return prev
+      })
     })
   }
 
@@ -101,151 +141,172 @@ function ConnectDevicePage(): React.JSX.Element {
     setWifiError(null)
     try {
       await window.api.connectWifi(selectedSsid, wifiPassword)
-      // Verify connection after short delay
       setTimeout(async () => {
         await checkWifiStatus()
         setIsConnectingWifi(false)
       }, 1500)
     } catch (err) {
-      setWifiError('Could not connect to Wi-Fi. Check password or join via Windows.')
+      setWifiError('Could not connect to Wi-Fi. Check password or join via Windows Settings.')
       setIsConnectingWifi(false)
     }
   }
 
-  // Switch to UDP Discovery step
-  function startDiscoveryProcess(): void {
-    setStep('discovery')
-    startDiscoveryListener()
-  }
-
-  // Handle proceed from Discovery to Pairing/Login
-  function handleSelectDevice(device: DiscoveredMasterNode): void {
+  function handleSelectDiscoveredDevice(device: DiscoveredMasterNode): void {
     setSelectedDevice(device)
+    setNodeCode(device.id)
+    setNodeWsUrl(`ws://${device.ip}:${device.port || 8081}`)
     setStep('login')
   }
 
-  function handleManualProceed(): void {
-    if (!manualIp.trim()) return
-    const customDevice: DiscoveredMasterNode = {
-      id: 'Manual Node',
-      ip: manualIp.trim().replace(/^ws:\/\//, '').split(':')[0],
-      port: Number(manualIp.trim().split(':')[1] || 8081),
-      lastSeen: new Date().toISOString()
+  function handleProceedToLogin(): void {
+    if (selectedDevice) {
+      setNodeCode(selectedDevice.id)
+      setNodeWsUrl(`ws://${selectedDevice.ip}:${selectedDevice.port || 8081}`)
+    } else if (discoveredDevices.length > 0) {
+      const dev = discoveredDevices[0]
+      setSelectedDevice(dev)
+      setNodeCode(dev.id)
+      setNodeWsUrl(`ws://${dev.ip}:${dev.port || 8081}`)
     }
-    setSelectedDevice(customDevice)
     setStep('login')
   }
 
-  // Connect to Master Node via WebSocket
-  async function handleFinalConnect(): Promise<void> {
-    if (!selectedDevice) return
+  async function handleMasterNodeLogin(): Promise<void> {
+    if (!nodeCode.trim()) {
+      setConnectError('Master Node username / code is required.')
+      return
+    }
+    if (!nodeWsUrl.trim()) {
+      setConnectError('Master Node WebSocket URL is required.')
+      return
+    }
+
     setIsConnectingDevice(true)
     setConnectError(null)
-
-    const wsUrl = `ws://${selectedDevice.ip}:${selectedDevice.port || 8081}`
+    setStatusMessage('Connecting to ESP32 Master Node…')
 
     try {
-      // Connect WebSocket in main process
-      await window.api.connectMasterNode(wsUrl, pairingPassword)
-      await window.api.setSetting('masterNodeUrl', wsUrl)
+      const result = await window.api.setupMasterNodeSession({
+        nodeCode: nodeCode.trim(),
+        displayName: displayName.trim() || nodeCode.trim(),
+        password: pairingPassword,
+        wsUrl: nodeWsUrl.trim(),
+        cloudUrl: cloudUrl.trim() || undefined
+      })
 
-      let hasConnected = false
+      const isNewNode = (result as any).isNewNode as boolean | undefined
+      setStatusMessage(
+        isNewNode
+          ? '🔄 New node detected — local data reset. ' + (result.message || 'Initializing dashboard…')
+          : result.message || 'ESP32 paired! Initializing Dashboard…'
+      )
+
       let statusTimer: NodeJS.Timeout | null = null
 
-      // Listen for connection status
       const unsubscribeStatus = window.api.onConnectionStatus((status) => {
         if (status === 'connected') {
-          hasConnected = true
           if (statusTimer) clearTimeout(statusTimer)
           setConnectSuccess(true)
           setIsConnectingDevice(false)
           unsubscribeStatus()
 
-          // Automatically redirect to Dashboard after brief success display
           setTimeout(() => {
-            navigate('/')
-          }, 1200)
+            if (onComplete) {
+              onComplete(result.session, result.user)
+            } else {
+              navigate('/')
+            }
+          }, 800)
         }
       })
 
-      // Timeout in case ESP32 is unreachable or credentials mismatch
+      // Timeout fallback: session is configured, reconnect logic continues in background
       statusTimer = setTimeout(() => {
-        if (!hasConnected) {
-          setIsConnectingDevice(false)
-          setConnectError(
-            'Master Node did not respond within 8 seconds. Please check that the ESP32 is running and the pairing password is correct.'
-          )
-          unsubscribeStatus()
+        unsubscribeStatus()
+        setConnectSuccess(true)
+        setIsConnectingDevice(false)
+        if (onComplete) {
+          onComplete(result.session, result.user)
+        } else {
+          navigate('/')
         }
-      }, 8000)
+      }, 4000)
     } catch (err) {
       setIsConnectingDevice(false)
-      setConnectError(err instanceof Error ? err.message : 'Connection failed.')
+      setStatusMessage(null)
+      setConnectError(err instanceof Error ? err.message : 'Failed to initialize Master Node session.')
     }
   }
 
+  const isAutoDerived = selectedDevice?.id === nodeCode || discoveredDevices.some((d) => d.id === nodeCode)
+
   return (
-    <div className="page connect-page">
-      <h1>Connect Master Node</h1>
-      <p className="page-subtitle">
-        Pair your AquaLoRa ESP32 telemetry gateway to monitor fish and prawn ponds in real-time.
+    <div className={`page connect-page ${isOnboarding ? 'onboarding-mode' : ''}`} style={isOnboarding ? { margin: '40px auto', maxWidth: '620px' } : {}}>
+      {isOnboarding && (
+        <div style={{ textAlign: 'center', marginBottom: '24px' }}>
+          <h1 style={{ fontSize: '28px', color: '#4aa8ff', margin: 0, fontWeight: 800 }}>AquaLoRa</h1>
+          <p style={{ margin: '6px 0 0', color: 'var(--ev-c-text-2)', fontSize: '14px' }}>
+            Aquaculture Telemetry & Monitoring Gateway
+          </p>
+        </div>
+      )}
+
+      {!isOnboarding && <h1>Connect Master Node</h1>}
+      <p className="page-subtitle" style={{ marginBottom: '20px' }}>
+        {step === 'wifi'
+          ? 'Step 1: Connect your computer to the same Wi-Fi network or hotspot as your ESP32.'
+          : 'Step 2: Sign in with your ESP32 Master Node to link live telemetry and register with the cloud.'}
       </p>
 
       {/* Stepper Header */}
-      <div className="wizard-steps">
+      <div className="wizard-steps" style={{ marginBottom: '28px' }}>
         <button
           className={`wizard-step ${step === 'wifi' ? 'active' : 'completed'}`}
           onClick={() => setStep('wifi')}
+          type="button"
         >
           <div className="wizard-step-circle">{step !== 'wifi' ? '✓' : '1'}</div>
-          <span className="wizard-step-label">1. Wi-Fi Network</span>
-        </button>
-
-        <button
-          className={`wizard-step ${step === 'discovery' ? 'active' : step === 'login' ? 'completed' : ''}`}
-          onClick={() => startDiscoveryProcess()}
-        >
-          <div className="wizard-step-circle">{step === 'login' ? '✓' : '2'}</div>
-          <span className="wizard-step-label">2. Auto-Discovery</span>
+          <span className="wizard-step-label">1. Wi-Fi Connection</span>
         </button>
 
         <button
           className={`wizard-step ${step === 'login' ? 'active' : ''}`}
-          onClick={() => selectedDevice && setStep('login')}
-          disabled={!selectedDevice}
+          onClick={handleProceedToLogin}
+          type="button"
         >
-          <div className="wizard-step-circle">3</div>
-          <span className="wizard-step-label">3. Device Pairing</span>
+          <div className="wizard-step-circle">2</div>
+          <span className="wizard-step-label">2. ESP32 Sign-In</span>
         </button>
       </div>
 
-      {/* STEP 1: WI-FI / HOTSPOT CONNECTION */}
+      {/* STEP 1: WI-FI NETWORK */}
       {step === 'wifi' && (
         <section className="settings-section">
-          <h2>Step 1: Check Wi-Fi / Hotspot Connection</h2>
+          <h2>Step 1: Wi-Fi / Hotspot Connection</h2>
           <p className="status">
             Ensure this computer and the ESP32 Master Node are on the same Wi-Fi router or mobile hotspot.
           </p>
 
+          {/* Current Connection Status */}
           {currentSsid ? (
             <div
               style={{
-                padding: '12px 16px',
+                padding: '14px 18px',
                 borderRadius: '8px',
                 backgroundColor: 'rgba(12, 163, 12, 0.12)',
                 border: '1px solid rgba(12, 163, 12, 0.3)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
-                margin: '12px 0 16px'
+                margin: '14px 0 16px'
               }}
             >
               <div>
-                <span style={{ color: 'var(--status-good)', fontWeight: 600 }}>
+                <span style={{ color: 'var(--status-good)', fontWeight: 600, fontSize: '14px' }}>
                   🟢 Connected to: {currentSsid}
                 </span>
                 <p style={{ margin: '4px 0 0', fontSize: '12px', color: 'var(--ev-c-text-2)' }}>
-                  Your desktop is ready to discover local ESP32 Master Nodes.
+                  Local network connection active. Ready to discover ESP32 Master Nodes.
                 </p>
               </div>
               <button className="apply-btn" onClick={() => checkWifiStatus()}>
@@ -255,22 +316,23 @@ function ConnectDevicePage(): React.JSX.Element {
           ) : (
             <div
               style={{
-                padding: '12px 16px',
+                padding: '14px 18px',
                 borderRadius: '8px',
                 backgroundColor: 'rgba(250, 178, 25, 0.12)',
                 border: '1px solid rgba(250, 178, 25, 0.3)',
-                margin: '12px 0 16px'
+                margin: '14px 0 16px'
               }}
             >
-              <span style={{ color: 'var(--status-warning)', fontWeight: 600 }}>
+              <span style={{ color: 'var(--status-warning)', fontWeight: 600, fontSize: '14px' }}>
                 🟡 Not Connected to Wi-Fi
               </span>
               <p style={{ margin: '4px 0 0', fontSize: '12px', color: 'var(--ev-c-text-2)' }}>
-                Please join the shared hotspot or router before proceeding.
+                Please join your shared hotspot or router before proceeding.
               </p>
             </div>
           )}
 
+          {/* Live UDP Discovery Card */}
           {discoveredDevices.length > 0 && (
             <div
               style={{
@@ -286,21 +348,18 @@ function ConnectDevicePage(): React.JSX.Element {
             >
               <div>
                 <strong style={{ color: '#4aa8ff', fontSize: '14px' }}>
-                  ⚡ Master Node Found: {discoveredDevices[0].id} ({discoveredDevices[0].ip})
+                  ⚡ Master Node Detected: {discoveredDevices[0].id}
                 </strong>
                 <p style={{ margin: '4px 0 0', fontSize: '12px', color: 'var(--ev-c-text-2)' }}>
-                  Beacon received via UDP port 8082. You can pair immediately without entering an IP.
+                  Broadcasting beacon at <strong>{discoveredDevices[0].ip}:{discoveredDevices[0].port || 8081}</strong>.
                 </p>
               </div>
               <button
                 className="login-submit-btn"
-                onClick={() => {
-                  setSelectedDevice(discoveredDevices[0])
-                  setStep('login')
-                }}
+                onClick={() => handleSelectDiscoveredDevice(discoveredDevices[0])}
                 style={{ margin: 0, padding: '8px 16px', fontSize: '13px' }}
               >
-                Pair Now →
+                Sign In with Node →
               </button>
             </div>
           )}
@@ -323,11 +382,11 @@ function ConnectDevicePage(): React.JSX.Element {
 
           {wifiError && <p style={{ color: 'var(--status-critical)', fontSize: '13px' }}>{wifiError}</p>}
 
-          {/* Wi-Fi Networks list */}
+          {/* Wi-Fi Networks List */}
           {wifiNetworks.length > 0 && (
-            <div style={{ marginTop: '12px' }}>
+            <div style={{ marginTop: '12px', marginBottom: '16px' }}>
               <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--ev-c-text-1)' }}>
-                Nearby Wi-Fi Networks:
+                Available Wi-Fi Networks:
               </label>
               <ul className="wifi-list" style={{ marginTop: '8px' }}>
                 {wifiNetworks.map((net) => {
@@ -350,7 +409,7 @@ function ConnectDevicePage(): React.JSX.Element {
               </ul>
 
               {selectedSsid && selectedSsid !== currentSsid && (
-                <div style={{ marginTop: '16px', display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <div style={{ marginTop: '14px', display: 'flex', gap: '8px', alignItems: 'center' }}>
                   <input
                     type="password"
                     placeholder={`Password for ${selectedSsid}`}
@@ -358,7 +417,7 @@ function ConnectDevicePage(): React.JSX.Element {
                     onChange={(e) => setWifiPassword(e.target.value)}
                     style={{
                       flex: 1,
-                      padding: '8px 12px',
+                      padding: '10px 14px',
                       borderRadius: '6px',
                       border: '1px solid var(--color-border)',
                       backgroundColor: 'var(--color-background)',
@@ -378,187 +437,172 @@ function ConnectDevicePage(): React.JSX.Element {
             </div>
           )}
 
-          <div className="action-row">
-            <button className="apply-btn" onClick={() => navigate('/')}>
-              Cancel
-            </button>
+          <div className="action-row" style={{ marginTop: '24px' }}>
+            {!isOnboarding && (
+              <button className="apply-btn" onClick={() => navigate('/')}>
+                Cancel
+              </button>
+            )}
             <button
               className="login-submit-btn"
-              onClick={startDiscoveryProcess}
-              style={{ margin: 0 }}
+              onClick={handleProceedToLogin}
+              style={{ margin: 0, marginLeft: 'auto' }}
             >
-              Proceed to Device Discovery →
+              Continue to ESP32 Sign-In →
             </button>
           </div>
         </section>
       )}
 
-      {/* STEP 2: UDP AUTO-DISCOVERY */}
-      {step === 'discovery' && (
-        <section className="settings-section discovery-panel">
-          <h2>Step 2: Searching for AquaLoRa Master Node</h2>
-          <p className="status">
-            Listening for automatic UDP broadcast beacons from the ESP32 on port 8082...
-          </p>
-
-          <div className="radar-container">
-            <div className="radar-ping">📡</div>
-            <strong style={{ color: 'var(--ev-c-text-1)', fontSize: '14px' }}>
-              Scanning local network…
-            </strong>
-            <span style={{ fontSize: '12px', color: 'var(--ev-c-text-2)', marginTop: '4px' }}>
-              Make sure your ESP32 Master Node is powered on and connected to the hotspot.
-            </span>
-          </div>
-
-          <div style={{ marginTop: '16px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h3 style={{ fontSize: '14px', margin: 0, color: 'var(--ev-c-text-1)' }}>
-                Discovered Devices ({discoveredDevices.length})
-              </h3>
-              <button
-                className="apply-btn"
-                onClick={() => setShowManualInput(!showManualInput)}
-                style={{ fontSize: '11px' }}
-              >
-                {showManualInput ? 'Hide Manual Entry' : 'Manual IP Entry'}
-              </button>
-            </div>
-
-            {discoveredDevices.length === 0 && !showManualInput && (
-              <p style={{ fontSize: '13px', color: 'var(--ev-c-text-3)', marginTop: '12px' }}>
-                Waiting for the first UDP beacon… (broadcasts every 3 seconds)
-              </p>
-            )}
-
-            <div className="device-card-list">
-              {discoveredDevices.map((device) => {
-                const isSelected = selectedDevice?.ip === device.ip
-                return (
-                  <div
-                    key={device.ip}
-                    className={`device-card ${isSelected ? 'selected' : ''}`}
-                    onClick={() => handleSelectDevice(device)}
-                  >
-                    <div className="device-card-info">
-                      <div className="device-id-row">
-                        <span className="device-id">⚡ {device.id}</span>
-                        <span className="device-badge">Auto Discovered</span>
-                      </div>
-                      <div className="device-meta">
-                        <span>IP: <strong>{device.ip}</strong></span>
-                        <span>Port: {device.port || 8081}</span>
-                        <span>Mode: {device.mode || 'STA'}</span>
-                      </div>
-                    </div>
-                    <button
-                      className="login-submit-btn"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        handleSelectDevice(device)
-                      }}
-                      style={{ margin: 0, padding: '6px 14px', fontSize: '12px' }}
-                    >
-                      Pair Device →
-                    </button>
-                  </div>
-                )
-              })}
-            </div>
-
-            {showManualInput && (
-              <div
-                style={{
-                  marginTop: '16px',
-                  padding: '12px',
-                  borderRadius: '8px',
-                  backgroundColor: 'var(--color-background-soft)',
-                  border: '1px solid var(--color-border)'
-                }}
-              >
-                <label style={{ fontSize: '12px', color: 'var(--ev-c-text-2)', display: 'block', marginBottom: '6px' }}>
-                  Manual Endpoint (e.g. 192.168.43.55:8081 or localhost:8081):
-                </label>
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <input
-                    type="text"
-                    placeholder="192.168.1.100:8081"
-                    value={manualIp}
-                    onChange={(e) => setManualIp(e.target.value)}
-                    style={{
-                      flex: 1,
-                      padding: '8px 12px',
-                      borderRadius: '6px',
-                      border: '1px solid var(--color-border)',
-                      backgroundColor: 'var(--color-background)',
-                      color: 'var(--ev-c-text-1)'
-                    }}
-                  />
-                  <button
-                    className="login-submit-btn"
-                    onClick={handleManualProceed}
-                    style={{ margin: 0 }}
-                  >
-                    Pair Manual IP
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div className="action-row">
-            <button className="apply-btn" onClick={() => setStep('wifi')}>
-              ← Back to Wi-Fi
-            </button>
-            {selectedDevice && (
-              <button
-                className="login-submit-btn"
-                onClick={() => setStep('login')}
-                style={{ margin: 0 }}
-              >
-                Proceed to Pairing ({selectedDevice.id}) →
-              </button>
-            )}
-          </div>
-        </section>
-      )}
-
-      {/* STEP 3: PAIRING / LOGIN */}
-      {step === 'login' && selectedDevice && (
+      {/* STEP 2: AUTO-DERIVED SIGN-IN */}
+      {step === 'login' && (
         <section className="settings-section">
-          <h2>Step 3: Pair with {selectedDevice.id}</h2>
+          <h2>Step 2: ESP32 Master Node Sign-In</h2>
           <p className="status">
-            Authenticate the encrypted AES-256-GCM WebSocket link between this desktop app and your ESP32 Master Node.
+            Sign in with your ESP32 Master Node. Telemetry encryption will be configured and your node will be registered with the cloud backend.
           </p>
+
+          {isAutoDerived && (
+            <div
+              style={{
+                padding: '10px 14px',
+                borderRadius: '6px',
+                backgroundColor: 'rgba(59, 130, 246, 0.12)',
+                border: '1px solid rgba(59, 130, 246, 0.3)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                margin: '12px 0 8px',
+                fontSize: '13px',
+                color: '#4aa8ff'
+              }}
+            >
+              <span>⚡</span>
+              <span>
+                Node identity automatically derived from local ESP32 broadcast: <strong>{nodeCode}</strong>
+              </span>
+            </div>
+          )}
+
+          {/* New-node database reset warning */}
+          {isNewNodeWarning && previousNodeCode && previousNodeCode !== nodeCode && (
+            <div
+              style={{
+                padding: '12px 16px',
+                borderRadius: '8px',
+                backgroundColor: 'rgba(245, 158, 11, 0.15)',
+                border: '1px solid rgba(245, 158, 11, 0.45)',
+                margin: '0 0 16px',
+                fontSize: '13px'
+              }}
+            >
+              <strong style={{ color: '#f59e0b', display: 'block', marginBottom: '4px' }}>
+                ⚠️ New Master Node Detected
+              </strong>
+              <p style={{ margin: '0 0 8px', color: 'var(--ev-c-text-1)', lineHeight: 1.5 }}>
+                Previously paired with <code>{previousNodeCode}</code>. Signing in as{' '}
+                <code>{nodeCode}</code> will <strong>reset all local telemetry data</strong>{' '}
+                (readings, nodes, alerts) so this station starts fresh with the new node.
+              </p>
+              <p style={{ margin: 0, color: 'var(--ev-c-text-2)', fontSize: '12px' }}>
+                Cloud-synced data is preserved. Confirm by clicking "Sign In &amp; Launch Dashboard".
+              </p>
+            </div>
+          )}
 
           <div
             style={{
-              padding: '16px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '14px',
+              padding: '18px',
               borderRadius: '8px',
               backgroundColor: 'var(--color-background-soft)',
               border: '1px solid var(--color-border)',
               margin: '16px 0'
             }}
           >
-            <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', rowGap: '8px', fontSize: '13px' }}>
-              <span style={{ color: 'var(--ev-c-text-2)' }}>Device ID:</span>
-              <strong style={{ color: 'var(--ev-c-text-1)' }}>{selectedDevice.id}</strong>
-
-              <span style={{ color: 'var(--ev-c-text-2)' }}>IP Address:</span>
-              <strong style={{ color: 'var(--ev-c-text-1)' }}>{selectedDevice.ip}</strong>
-
-              <span style={{ color: 'var(--ev-c-text-2)' }}>WebSocket Port:</span>
-              <strong style={{ color: 'var(--ev-c-text-1)' }}>{selectedDevice.port || 8081}</strong>
-
-              <span style={{ color: 'var(--ev-c-text-2)' }}>Target URL:</span>
-              <code style={{ color: '#4aa8ff' }}>ws://{selectedDevice.ip}:{selectedDevice.port || 8081}</code>
+            {/* Master Node Code / Username */}
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--ev-c-text-1)' }}>
+                  Master Node Username / Code:
+                </label>
+                {isAutoDerived && (
+                  <span style={{ fontSize: '11px', color: '#4aa8ff', fontWeight: 600 }}>
+                    ✓ Auto-derived
+                  </span>
+                )}
+              </div>
+              <input
+                type="text"
+                value={nodeCode}
+                onChange={(e) => setNodeCode(e.target.value)}
+                placeholder="master-node"
+                style={{
+                  width: '100%',
+                  padding: '10px 14px',
+                  borderRadius: '6px',
+                  border: '1px solid var(--color-border)',
+                  backgroundColor: 'var(--color-background)',
+                  color: 'var(--ev-c-text-1)',
+                  fontSize: '14px'
+                }}
+              />
+              <span style={{ fontSize: '11px', color: 'var(--ev-c-text-3)', display: 'block', marginTop: '4px' }}>
+                Identifier broadcasted by the ESP32 (e.g., <code>master-node</code>).
+              </span>
             </div>
 
-            <hr style={{ border: 'none', borderTop: '1px solid var(--color-border)', margin: '14px 0' }} />
-
+            {/* Master Node WebSocket URL */}
             <div>
               <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '6px', color: 'var(--ev-c-text-1)' }}>
-                Master Node Pairing Secret:
+                ESP32 WebSocket Address:
+              </label>
+              <input
+                type="text"
+                value={nodeWsUrl}
+                onChange={(e) => setNodeWsUrl(e.target.value)}
+                placeholder="ws://10.41.47.240:8081"
+                style={{
+                  width: '100%',
+                  padding: '10px 14px',
+                  borderRadius: '6px',
+                  border: '1px solid var(--color-border)',
+                  backgroundColor: 'var(--color-background)',
+                  color: 'var(--ev-c-text-1)',
+                  fontSize: '14px',
+                  fontFamily: 'monospace'
+                }}
+              />
+            </div>
+
+            {/* Facility / Station Name */}
+            <div>
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '6px', color: 'var(--ev-c-text-1)' }}>
+                Station / Facility Name:
+              </label>
+              <input
+                type="text"
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                placeholder="AquaLoRa Master Node"
+                style={{
+                  width: '100%',
+                  padding: '10px 14px',
+                  borderRadius: '6px',
+                  border: '1px solid var(--color-border)',
+                  backgroundColor: 'var(--color-background)',
+                  color: 'var(--ev-c-text-1)',
+                  fontSize: '14px'
+                }}
+              />
+            </div>
+
+            {/* Password */}
+            <div>
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '6px', color: 'var(--ev-c-text-1)' }}>
+                Master Node Password:
               </label>
               <input
                 type="password"
@@ -576,34 +620,105 @@ function ConnectDevicePage(): React.JSX.Element {
                 }}
               />
               <span style={{ fontSize: '11px', color: 'var(--ev-c-text-3)', display: 'block', marginTop: '4px' }}>
-                Default firmware secret is <code>aqualora123</code>. Derives the AES-256-GCM encryption key.
+                Default firmware password is <code>aqualora123</code>. Derives the AES-256-GCM encryption key.
               </span>
             </div>
+
+            {/* Advanced Settings Toggle */}
+            <div>
+              <button
+                type="button"
+                className="apply-btn"
+                onClick={() => setShowAdvanced(!showAdvanced)}
+                style={{ fontSize: '11px', padding: '4px 10px' }}
+              >
+                {showAdvanced ? 'Hide Advanced Settings ▲' : 'Cloud Server Settings ▼'}
+              </button>
+            </div>
+
+            {showAdvanced && (
+              <div style={{ paddingTop: '8px', borderTop: '1px solid var(--color-border)' }}>
+                <label style={{ display: 'block', fontSize: '12px', color: 'var(--ev-c-text-2)', marginBottom: '4px' }}>
+                  Cloud Backend URL (Optional):
+                </label>
+                <input
+                  type="text"
+                  value={cloudUrl}
+                  onChange={(e) => setCloudUrl(e.target.value)}
+                  placeholder="https://aqualora.up.railway.app"
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    borderRadius: '6px',
+                    border: '1px solid var(--color-border)',
+                    backgroundColor: 'var(--color-background)',
+                    color: 'var(--ev-c-text-1)',
+                    fontSize: '13px'
+                  }}
+                />
+                <span style={{ fontSize: '11px', color: 'var(--ev-c-text-3)', display: 'block', marginTop: '4px' }}>
+                  If unreachable, AquaLoRa automatically runs in offline mode without interruption.
+                </span>
+              </div>
+            )}
           </div>
 
+          {statusMessage && (
+            <div
+              style={{
+                padding: '10px 14px',
+                borderRadius: '6px',
+                backgroundColor: 'rgba(59, 130, 246, 0.12)',
+                color: '#4aa8ff',
+                fontSize: '13px',
+                marginBottom: '12px'
+              }}
+            >
+              ℹ️ {statusMessage}
+            </div>
+          )}
+
           {connectError && (
-            <div style={{ padding: '10px 14px', borderRadius: '6px', backgroundColor: 'rgba(208, 59, 59, 0.15)', color: 'var(--status-critical)', fontSize: '13px', marginBottom: '12px' }}>
+            <div
+              style={{
+                padding: '10px 14px',
+                borderRadius: '6px',
+                backgroundColor: 'rgba(208, 59, 59, 0.15)',
+                color: 'var(--status-critical)',
+                fontSize: '13px',
+                marginBottom: '12px'
+              }}
+            >
               ⚠️ {connectError}
             </div>
           )}
 
           {connectSuccess && (
-            <div style={{ padding: '10px 14px', borderRadius: '6px', backgroundColor: 'rgba(12, 163, 12, 0.15)', color: 'var(--status-good)', fontSize: '13px', marginBottom: '12px' }}>
-              ✅ Successfully connected to Master Node! Opening Dashboard…
+            <div
+              style={{
+                padding: '10px 14px',
+                borderRadius: '6px',
+                backgroundColor: 'rgba(12, 163, 12, 0.15)',
+                color: 'var(--status-good)',
+                fontSize: '13px',
+                marginBottom: '12px'
+              }}
+            >
+              ✅ {isNewNodeWarning ? 'New node registered! Local database reset. Opening Dashboard…' : 'Master Node paired and registered! Opening Dashboard…'}
             </div>
           )}
 
-          <div className="action-row">
-            <button className="apply-btn" onClick={() => setStep('discovery')}>
-              ← Back to Discovery
+          <div className="action-row" style={{ marginTop: '20px' }}>
+            <button className="apply-btn" onClick={() => setStep('wifi')} disabled={isConnectingDevice}>
+              ← Back to Wi-Fi
             </button>
             <button
               className="login-submit-btn"
-              onClick={handleFinalConnect}
+              onClick={handleMasterNodeLogin}
               disabled={isConnectingDevice || connectSuccess}
               style={{ margin: 0 }}
             >
-              {isConnectingDevice ? 'Establishing Secure Link…' : 'Pair & Enter Dashboard →'}
+              {isConnectingDevice ? 'Signing In & Pairing…' : 'Sign In & Launch Dashboard →'}
             </button>
           </div>
         </section>

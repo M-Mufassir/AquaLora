@@ -142,6 +142,18 @@ const api = {
     ipcRenderer.invoke('cloud:login', nodeCode, password),
   activateLocalSession: (nodeCode?: string): Promise<any> =>
     ipcRenderer.invoke('cloud:activateLocal', nodeCode),
+  setupMasterNodeSession: (payload: {
+    nodeCode: string
+    displayName?: string
+    password?: string
+    wsUrl: string
+    cloudUrl?: string
+  }): Promise<{
+    session: any
+    user: { username: string; role: string }
+    cloudSynced: boolean
+    message?: string
+  }> => ipcRenderer.invoke('auth:setupMasterNodeSession', payload),
   cloudLogout: (): Promise<boolean> => ipcRenderer.invoke('cloud:logout'),
   getCloudSession: (): Promise<any> => ipcRenderer.invoke('cloud:getSession'),
   validateCloudSession: (): Promise<boolean> => ipcRenderer.invoke('cloud:validateSession'),
@@ -155,7 +167,9 @@ const api = {
   syncNodesCloud: (): Promise<{ received: number; stored: number }> =>
     ipcRenderer.invoke('nodes:syncCloud'),
   fetchNodesCloud: (): Promise<any[]> =>
-    ipcRenderer.invoke('nodes:fetchCloud')
+    ipcRenderer.invoke('nodes:fetchCloud'),
+  resetLocalNodeData: (): Promise<{ nodes: number; readings: number; alerts: number; outbox: number }> =>
+    ipcRenderer.invoke('db:resetLocalNodeData')
 }
 
 // Use `contextBridge` APIs to expose Electron APIs to

@@ -1,8 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { HashRouter, Routes, Route, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useReadingsStore } from './store/useReadingsStore'
-import LoginScreen from './components/LoginScreen'
-import CloudActivationScreen from './components/CloudActivationScreen'
 import ThemeToggle from './components/ThemeToggle'
 import CriticalAlertOverlay from './components/CriticalAlertOverlay'
 import HomePage from './pages/HomePage'
@@ -60,8 +58,9 @@ function App(): React.JSX.Element {
       setCloudSession(session)
       setCloudSessionChecked(true)
 
-      // Silent background validation when online
+      // Auto-restore session for the operator
       if (session) {
+        setCurrentUser({ username: session.nodeCode, role: session.role || 'operator' })
         window.api.validateCloudSession().then((valid) => {
           if (!valid) {
             console.warn('[App] Stored cloud session is no longer valid on backend.')
@@ -73,7 +72,7 @@ function App(): React.JSX.Element {
     window.api.getSyncStatus().then(setSyncStatus)
     const unsubscribe = window.api.onSyncStatus((status) => setSyncStatus(status))
     return () => unsubscribe()
-  }, [setSettings, setSyncStatus])
+  }, [setSettings, setSyncStatus, setCurrentUser])
 
   useEffect(() => {
     if (!currentUser) return
@@ -123,14 +122,19 @@ function App(): React.JSX.Element {
     )
   }
 
-  // If this workstation has not been activated with a Master Node identity yet, show activation
-  if (!cloudSession) {
-    return <CloudActivationScreen onActivated={(session) => setCloudSession(session)} />
-  }
-
-  // Everyday local operator login
-  if (!currentUser) {
-    return <LoginScreen onLogin={(username, role) => setCurrentUser({ username, role })} />
+  // If this workstation has no active session, show the unified 2-step setup & sign-in flow
+  if (!cloudSession || !currentUser) {
+    return (
+      <HashRouter>
+        <ConnectDevicePage
+          isOnboarding
+          onComplete={(session, user) => {
+            setCloudSession(session)
+            setCurrentUser(user)
+          }}
+        />
+      </HashRouter>
+    )
   }
 
   return (
@@ -206,7 +210,14 @@ function App(): React.JSX.Element {
           <span className="nav-user">
             {currentUser.username} <span className="nav-user-role">({currentUser.role})</span>
           </span>
-          <button className="logout-btn" onClick={() => setCurrentUser(null)}>
+          <button
+            className="logout-btn"
+            onClick={async () => {
+              await window.api.cloudLogout()
+              setCloudSession(null)
+              setCurrentUser(null)
+            }}
+          >
             Log out
           </button>
           <ThemeToggle />

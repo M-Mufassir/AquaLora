@@ -59,10 +59,23 @@ export function clearCloudSession(): void {
   deleteSetting(NODE_CODE_KEY)
 }
 
-export async function validateCloudSession(baseUrl: string, token: string): Promise<boolean> {
-  if (!baseUrl || !token) return false
+export function resolveCloudUrl(path: string, customBaseUrl?: string): string {
+  let base = (customBaseUrl || getSettingOptional('cloud_sync_url') || '').trim()
+  if (!base) {
+    base = 'https://aqualora.up.railway.app/api'
+  }
+  base = base.replace(/\/+$/, '')
+  if (base.includes('aqualora.up.railway.app') && !base.endsWith('/api')) {
+    base = `${base}/api`
+  }
+  const cleanPath = path.startsWith('/') ? path.slice(1) : path
+  return `${base}/${cleanPath}`
+}
+
+export async function validateCloudSession(baseUrl?: string, token?: string): Promise<boolean> {
+  if (!token) return false
   try {
-    const url = new URL('/master-nodes/me', baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`).toString()
+    const url = resolveCloudUrl('/master-nodes/me', baseUrl)
     const response = await fetch(url, {
       method: 'GET',
       headers: {

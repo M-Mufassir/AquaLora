@@ -17,6 +17,7 @@ import {
   markStaleNodesOffline,
   userCount,
   createUser,
+  upsertUser,
   verifyUser,
   listUsers,
   deleteUser,
@@ -42,13 +43,15 @@ import {
   markOutboxSynced,
   markOutboxFailed,
   markAlertOutboxSynced,
-  markAlertOutboxFailed
+  markAlertOutboxFailed,
+  resetLocalNodeData
 } from './db'
 import {
   saveCloudSession,
   loadCloudSession,
   clearCloudSession,
   validateCloudSession,
+  resolveCloudUrl,
   type CloudSessionData
 } from './cloudSession'
 import { MasterNodeClient } from './masterNodeClient'
@@ -128,7 +131,7 @@ async function syncQueuedReadings(isManual = false): Promise<void> {
   try {
     // Sync readings
     if (pendingEntries.length > 0) {
-      const syncUrl = new URL('/readings/sync', baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`).toString()
+      const syncUrl = resolveCloudUrl('/readings/sync', baseUrl)
       const readings = pendingEntries.map((entry) => JSON.parse(entry.payload_json))
 
       const response = await fetch(syncUrl, {
@@ -149,7 +152,7 @@ async function syncQueuedReadings(isManual = false): Promise<void> {
 
     // Sync alerts
     if (pendingAlerts.length > 0) {
-      const alertSyncUrl = new URL('/alerts/sync', baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`).toString()
+      const alertSyncUrl = resolveCloudUrl('/alerts/sync', baseUrl)
       const alerts = pendingAlerts.map((entry) => JSON.parse(entry.payload_json))
 
       const response = await fetch(alertSyncUrl, {
@@ -244,6 +247,213 @@ app.whenReady().then(() => {
   ipcMain.handle('auth:login', (_event, username: string, password: string) => {
     const user = verifyUser(username, password)
     return user?.role === 'admin' ? null : user
+  })
+
+  ipcMain.handle(
+    'auth:setupMasterNodeSession',
+    async (
+      _event,
+      payload: {
+        nodeCode: string
+        displayName?: string
+        password?: string
+        wsUrl: string
+        cloudUrl?: string
+      }
+    ) => {
+      const nodeCode = payload.nodeCode.trim()
+      const displayName = payload.displayName?.trim() || nodeCode
+      const password = payload.password?.trim() || ''
+      const wsUrl = payload.wsUrl.trim()
+      const cloudUrl =
+        payload.cloudUrl?.trim() ||
+        getSettingOptional('cloud_sync_url')?.trim() ||
+        'https://aqualora.up.railway.app/api'
+
+      // 1. Detect if this is a new (different) Master Node — if so, reset local telemetry data
+      const previousNodeCode = getSettingOptional('master_node_code')
+      const isNewNode = !!previousNodeCode && previousNodeCode !== nodeCode
+      if (isNewNode) {
+        console.log(`[auth:setupMasterNodeSession] New node detected (was: ${previousNodeCode}, now: ${nodeCode}). Resetting local database.`)
+        resetLocalNodeData()
+      }
+
+      // 2. Save settings
+      setSetting('master_node_code', nodeCode)
+      setSetting('master_node_url', wsUrl)
+      if (payload.cloudUrl?.trim()) {
+        setSetting('cloud_sync_url', payload.cloudUrl.trim())
+      }
+
+      // 3. Derive key and connect WebSocket
+      if (password) {
+        const key = deriveKeyFromPassword(password)
+        setSetting('master_node_key_hex', key.toString('hex'))
+        masterNodeClient.connect(wsUrl, key)
+      } else {
+        setSetting('master_node_key_hex', '')
+        masterNodeClient.connect(wsUrl)
+      }
+
+      // 4. Upsert user in local SQLite database (using new node code as username)
+      upsertUser(nodeCode, password || 'aqualora123', 'operator')
+
+      // 5. Cloud Registration & Authentication
+      let session: CloudSessionData | null = null
+      let cloudSynced = false
+      let cloudMessage = ''
+      let registeredAsNew = false
+
+      try {
+        const loginUrl = resolveCloudUrl('/auth/login', cloudUrl)
+
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), 8000)
+
+        try {
+          // 5a. Try to login as existing node first
+          const loginRes = await fetch(loginUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              node_code: nodeCode,
+              password: password || 'aqualora123',
+              client: 'desktop'
+            }),
+            signal: controller.signal
+          })
+
+          if (loginRes.ok) {
+            const data = (await loginRes.json()) as any
+            session = {
+              token: data.access_token || data.token || '',
+              masterNodeId: data.master_node_id || 1,
+              nodeCode: data.node_code || nodeCode,
+              displayName: data.display_name || displayName,
+              role: data.role || 'customer',
+              savedAt: new Date().toISOString()
+            }
+            cloudSynced = true
+            cloudMessage = isNewNode
+              ? 'New node registered — local database reset. Authenticated with cloud.'
+              : 'Authenticated with cloud backend.'
+          } else if (loginRes.status === 401 || loginRes.status === 404) {
+            // 5b. Node not in cloud yet — auto-register using admin token
+            console.log('[auth:setupMasterNodeSession] Node not found in cloud — attempting auto-registration.')
+            try {
+              const adminRes = await fetch(loginUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: 'Admin', password: 'Admin123', client: 'web' }),
+                signal: controller.signal
+              })
+
+              if (adminRes.ok) {
+                const adminData = (await adminRes.json()) as any
+                const adminToken = adminData.access_token || adminData.token
+
+                // Register new master node in cloud
+                const regUrl = resolveCloudUrl('/master-nodes', cloudUrl)
+                const regRes = await fetch(regUrl, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${adminToken}`
+                  },
+                  body: JSON.stringify({
+                    node_code: nodeCode.toUpperCase(),
+                    display_name: displayName,
+                    password: password || 'aqualora123',
+                    role: 'customer'
+                  }),
+                  signal: controller.signal
+                })
+
+                if (regRes.ok || regRes.status === 409) {
+                  registeredAsNew = regRes.ok
+                  // Login as the newly registered node
+                  const retryLoginRes = await fetch(loginUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      node_code: nodeCode,
+                      password: password || 'aqualora123',
+                      client: 'desktop'
+                    }),
+                    signal: controller.signal
+                  })
+                  if (retryLoginRes.ok) {
+                    const nodeData = (await retryLoginRes.json()) as any
+                    session = {
+                      token: nodeData.access_token || nodeData.token || '',
+                      masterNodeId: nodeData.master_node_id || 1,
+                      nodeCode: nodeData.node_code || nodeCode,
+                      displayName: nodeData.display_name || displayName,
+                      role: nodeData.role || 'customer',
+                      savedAt: new Date().toISOString()
+                    }
+                    cloudSynced = true
+                    cloudMessage = registeredAsNew
+                      ? 'New master node registered in cloud and authenticated successfully.'
+                      : 'Authenticated with cloud backend (node already existed).'
+                  } else {
+                    console.warn('[auth:setupMasterNodeSession] Login after registration failed:', retryLoginRes.status)
+                  }
+                } else {
+                  const regErr = await regRes.json().catch(() => ({}))
+                  console.warn('[auth:setupMasterNodeSession] Cloud registration rejected:', regRes.status, regErr)
+                }
+              } else {
+                console.warn('[auth:setupMasterNodeSession] Admin login failed — cannot auto-register node.')
+              }
+            } catch (regErr: any) {
+              console.warn(
+                '[auth:setupMasterNodeSession] Cloud auto-provisioning attempt failed:',
+                regErr.message
+              )
+            }
+          } else {
+            console.warn('[auth:setupMasterNodeSession] Unexpected login response:', loginRes.status)
+          }
+        } finally {
+          clearTimeout(timeoutId)
+        }
+      } catch (cloudErr: any) {
+        console.warn('[auth:setupMasterNodeSession] Cloud unreachable:', cloudErr.message)
+      }
+
+      // 6. If cloud didn't produce a session (offline / unreachable), use local-first offline session
+      if (!session) {
+        session = {
+          token: `local-session-${Date.now()}`,
+          masterNodeId: 1,
+          nodeCode: nodeCode,
+          displayName: displayName,
+          role: 'operator',
+          savedAt: new Date().toISOString()
+        }
+        cloudSynced = false
+        cloudMessage = isNewNode
+          ? 'New node registered locally. Cloud unreachable — will sync when connected.'
+          : 'Cloud unreachable (offline mode). Telemetry stored locally and will sync when connected.'
+      }
+
+      saveCloudSession(session)
+      return {
+        session,
+        user: { username: session.nodeCode, role: session.role === 'super_admin' ? 'operator' : (session.role || 'operator') },
+        cloudSynced,
+        isNewNode,
+        message: cloudMessage
+      }
+    }
+  )
+
+  // Explicit DB reset IPC (called from renderer when user confirms swapping to a new node)
+  ipcMain.handle('db:resetLocalNodeData', () => {
+    const result = resetLocalNodeData()
+    console.log('[main] Manual local node data reset:', result)
+    return result
   })
 
   ipcMain.handle('readings:getRecent', (_event, nodeId: string, limit?: number) =>
@@ -376,8 +586,7 @@ app.whenReady().then(() => {
   })
 
   ipcMain.handle('cloud:login', async (_event, nodeCode: string, password: string) => {
-    const baseUrl = getSettingOptional('cloud_sync_url')?.trim() || 'http://localhost:8000'
-    const loginUrl = new URL('/auth/login', baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`).toString()
+    const loginUrl = resolveCloudUrl('/auth/login')
     const response = await fetch(loginUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -442,14 +651,12 @@ app.whenReady().then(() => {
   ipcMain.handle('cloud:validateSession', async () => {
     const session = loadCloudSession()
     if (!session) return false
-    const baseUrl = getSettingOptional('cloud_sync_url')?.trim() || 'http://localhost:8000'
-    return await validateCloudSession(baseUrl, session.token)
+    return await validateCloudSession(undefined, session.token)
   })
 
   ipcMain.handle('cloud:getDirectory', async () => {
     try {
-      const baseUrl = getSettingOptional('cloud_sync_url')?.trim() || 'http://localhost:8000'
-      const dirUrl = new URL('/master-nodes/directory', baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`).toString()
+      const dirUrl = resolveCloudUrl('/master-nodes/directory')
       const response = await fetch(dirUrl)
       if (!response.ok) {
         return []
@@ -469,8 +676,7 @@ app.whenReady().then(() => {
   ipcMain.handle('cloud:getProfile', async () => {
     const session = loadCloudSession()
     if (!session) throw new Error('Not authenticated to cloud backend')
-    const baseUrl = getSettingOptional('cloud_sync_url')?.trim() || 'http://localhost:8000'
-    const profileUrl = new URL('/master-nodes/me', baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`).toString()
+    const profileUrl = resolveCloudUrl('/master-nodes/me')
     const response = await fetch(profileUrl, {
       headers: { Authorization: `Bearer ${session.token}` }
     })
@@ -483,8 +689,7 @@ app.whenReady().then(() => {
   ipcMain.handle('cloud:updateProfile', async (_event, payload: any) => {
     const session = loadCloudSession()
     if (!session) throw new Error('Not authenticated to cloud backend')
-    const baseUrl = getSettingOptional('cloud_sync_url')?.trim() || 'http://localhost:8000'
-    const profileUrl = new URL('/master-nodes/me', baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`).toString()
+    const profileUrl = resolveCloudUrl('/master-nodes/me')
     const response = await fetch(profileUrl, {
       method: 'PATCH',
       headers: {
@@ -507,8 +712,7 @@ app.whenReady().then(() => {
   ipcMain.handle('cloud:changePassword', async (_event, currentPassword: string, newPassword: string) => {
     const session = loadCloudSession()
     if (!session) throw new Error('Not authenticated to cloud backend')
-    const baseUrl = getSettingOptional('cloud_sync_url')?.trim() || 'http://localhost:8000'
-    const pwdUrl = new URL('/auth/change-password', baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`).toString()
+    const pwdUrl = resolveCloudUrl('/auth/change-password')
     const response = await fetch(pwdUrl, {
       method: 'POST',
       headers: {
@@ -539,8 +743,7 @@ app.whenReady().then(() => {
   ipcMain.handle('nodes:syncCloud', async () => {
     const session = loadCloudSession()
     if (!session) throw new Error('Not authenticated to cloud backend')
-    const baseUrl = getSettingOptional('cloud_sync_url')?.trim() || 'http://localhost:8000'
-    const syncUrl = new URL('/nodes/sync', baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`).toString()
+    const syncUrl = resolveCloudUrl('/nodes/sync')
     const allNodes = getAllNodes()
     const payload = allNodes.map((n: any) => ({
       node_id: n.id,
@@ -567,8 +770,7 @@ app.whenReady().then(() => {
   ipcMain.handle('nodes:fetchCloud', async () => {
     const session = loadCloudSession()
     if (!session) throw new Error('Not authenticated to cloud backend')
-    const baseUrl = getSettingOptional('cloud_sync_url')?.trim() || 'http://localhost:8000'
-    const nodesUrl = new URL('/nodes', baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`).toString()
+    const nodesUrl = resolveCloudUrl('/nodes')
     const response = await fetch(nodesUrl, {
       headers: { Authorization: `Bearer ${session.token}` }
     })
