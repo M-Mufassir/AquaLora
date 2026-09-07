@@ -232,6 +232,8 @@ function createWindow(): void {
     minWidth: 1024,
     minHeight: 640,
     show: false,
+    frame: false,
+    titleBarStyle: 'hidden',
     autoHideMenuBar: true,
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
@@ -287,6 +289,14 @@ app.whenReady().then(() => {
     const user = verifyUser(username, password)
     return user?.role === 'admin' ? null : user
   })
+
+  ipcMain.on('window:minimize', () => mainWindow?.minimize())
+  ipcMain.on('window:toggleMaximize', () => {
+    if (!mainWindow) return
+    if (mainWindow.isMaximized()) mainWindow.unmaximize()
+    else mainWindow.maximize()
+  })
+  ipcMain.on('window:close', () => mainWindow?.close())
 
   ipcMain.handle('shell:openExternal', async (_event, url: string) => {
     if (!/^https:\/\//i.test(url)) throw new Error('Only HTTPS links can be opened.')

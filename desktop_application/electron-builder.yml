@@ -1,7 +1,9 @@
-appId: com.electron.app
-productName: aqualora-scaffold
+appId: com.aqualora.desktop
+productName: AquaLoRa Desktop
 directories:
   buildResources: build
+  output: dist
+icon: build/icon.png
 files:
   - '!**/.vscode/*'
   - '!src/*'
@@ -12,12 +14,17 @@ files:
 asarUnpack:
   - resources/**
 win:
-  executableName: aqualora-scaffold
+  executableName: aqualora-desktop
+  target:
+    - nsis
+    - portable
 nsis:
-  artifactName: ${name}-${version}-setup.${ext}
+  artifactName: AquaLoRa-Desktop-${version}-setup.${ext}
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}
   createDesktopShortcut: always
+portable:
+  artifactName: AquaLoRa-Desktop-${version}-portable.${ext}
 mac:
   entitlementsInherit: build/entitlements.mac.plist
   extendInfo:

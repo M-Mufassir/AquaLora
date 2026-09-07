@@ -23,6 +23,11 @@ interface CsvExportResult {
 
 // Custom APIs for renderer
 const api = {
+  windowControls: {
+    minimize: (): void => ipcRenderer.send('window:minimize'),
+    toggleMaximize: (): void => ipcRenderer.send('window:toggleMaximize'),
+    close: (): void => ipcRenderer.send('window:close')
+  },
   openExternal: (url: string): Promise<void> => ipcRenderer.invoke('shell:openExternal', url),
   onReading: (callback: (reading: Reading) => void): (() => void) => {
     const listener = (_event: Electron.IpcRendererEvent, reading: Reading): void =>

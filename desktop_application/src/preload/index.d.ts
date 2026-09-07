@@ -20,6 +20,11 @@ interface CsvExportResult {
 }
 
 interface AquaLoraApi {
+  windowControls: {
+    minimize: () => void
+    toggleMaximize: () => void
+    close: () => void
+  }
   openExternal: (url: string) => Promise<void>
   onReading: (callback: (reading: Reading) => void) => () => void
   getRecentReadings: (nodeId: string, limit?: number) => Promise<StoredReading[]>

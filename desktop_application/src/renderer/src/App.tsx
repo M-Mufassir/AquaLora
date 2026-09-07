@@ -9,6 +9,29 @@ import SettingsPage from './pages/SettingsPage'
 import ConnectDevicePage from './pages/ConnectDevicePage'
 import MasterNodeProfilePage from './pages/MasterNodeProfilePage'
 
+function WindowTitleBar(): React.JSX.Element {
+  return (
+    <header className="window-titlebar">
+      <div className="window-titlebar-brand">
+        <span className="window-titlebar-mark">◈</span>
+        <span>AquaLoRa</span>
+        <span className="window-titlebar-caption">Desktop dashboard</span>
+      </div>
+      <div className="window-controls" aria-label="Window controls">
+        <button type="button" onClick={() => window.api.windowControls.minimize()} aria-label="Minimize">
+          <span className="window-icon window-icon-minimize" />
+        </button>
+        <button type="button" onClick={() => window.api.windowControls.toggleMaximize()} aria-label="Maximize or restore">
+          <span className="window-icon window-icon-maximize" />
+        </button>
+        <button type="button" className="window-close" onClick={() => window.api.windowControls.close()} aria-label="Close">
+          <span className="window-icon window-icon-close" />
+        </button>
+      </div>
+    </header>
+  )
+}
+
 // Sends a freshly logged-in user with zero paired nodes straight to the
 // pairing wizard instead of an empty Home page — but only once per app
 // session, so deliberately navigating back to Home afterwards isn't fought.
@@ -122,6 +145,7 @@ function App(): React.JSX.Element {
   if (!cloudSessionChecked) {
     return (
       <div className="login-screen">
+        <WindowTitleBar />
         <p style={{ color: 'var(--ev-c-text-2)' }}>Initializing AquaLoRa…</p>
       </div>
     )
@@ -130,21 +154,26 @@ function App(): React.JSX.Element {
   // If this workstation has no active session, show the unified 2-step setup & sign-in flow
   if (!cloudSession || !currentUser) {
     return (
-      <HashRouter>
-        <ConnectDevicePage
-          isOnboarding
-          onComplete={(session, user) => {
-            setCloudSession(session)
-            setCurrentUser(user)
-          }}
-        />
-      </HashRouter>
+      <>
+        <WindowTitleBar />
+        <HashRouter>
+          <ConnectDevicePage
+            isOnboarding
+            onComplete={(session, user) => {
+              setCloudSession(session)
+              setCurrentUser(user)
+            }}
+          />
+        </HashRouter>
+      </>
     )
   }
 
   return (
     <HashRouter>
-      <div className="app-shell">
+      <>
+        <WindowTitleBar />
+        <div className="app-shell">
         <FirstRunRedirect nodesLoaded={nodesLoaded} />
         <nav className="top-nav">
           <span className="app-title">AquaLoRa</span>
@@ -240,7 +269,8 @@ function App(): React.JSX.Element {
         </main>
 
         <CriticalAlertOverlay />
-      </div>
+        </div>
+      </>
     </HashRouter>
   )
 }

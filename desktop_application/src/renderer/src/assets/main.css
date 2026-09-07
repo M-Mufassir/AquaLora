@@ -181,6 +181,37 @@ code {
   justify-content: center;
 }
 
+.window-titlebar {
+  position: fixed;
+  inset: 0 0 auto;
+  z-index: 200;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-left: 16px;
+  background: color-mix(in srgb, var(--color-background) 92%, transparent);
+  border-bottom: 1px solid var(--color-border);
+  color: var(--ev-c-text-2);
+  -webkit-app-region: drag;
+  user-select: none;
+}
+
+.window-titlebar-brand, .window-controls { display: flex; align-items: center; }
+.window-titlebar-brand { gap: 8px; font-size: 12px; font-weight: 800; letter-spacing: .03em; }
+.window-titlebar-mark { color: var(--color-primary); font-size: 15px; }
+.window-titlebar-caption { color: var(--ev-c-text-3); font-size: 10px; font-weight: 600; }
+.window-controls { height: 100%; -webkit-app-region: no-drag; }
+.window-controls button { width: 48px; height: 100%; display: grid; place-items: center; border: 0; background: transparent; color: var(--ev-c-text-2); cursor: pointer; }
+.window-controls button:hover { background: rgba(255,255,255,.08); color: var(--ev-c-text-1); }
+.window-controls .window-close:hover { background: #c83d4b; color: #fff; }
+.window-icon { position: relative; display: block; width: 12px; height: 12px; }
+.window-icon-minimize::after { content: ''; position: absolute; left: 1px; right: 1px; bottom: 2px; height: 1px; background: currentColor; }
+.window-icon-maximize { border: 1px solid currentColor; border-radius: 1px; }
+.window-icon-close::before, .window-icon-close::after { content: ''; position: absolute; left: 5px; top: -1px; width: 1px; height: 14px; background: currentColor; transform: rotate(45deg); }
+.window-icon-close::after { transform: rotate(-45deg); }
+.app-shell { padding-top: 38px; }
+
 .admin-redirect-modal { position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center; padding: 24px; background: rgba(2, 11, 15, 0.72); backdrop-filter: blur(8px); }
 .admin-redirect-card { width: min(100%, 460px); padding: 30px; border: 1px solid var(--color-border); border-radius: 20px; background: var(--color-background-soft); color: var(--ev-c-text-1); text-align: center; box-shadow: 0 24px 70px rgba(0, 0, 0, 0.35); }
 .admin-redirect-icon { font-size: 34px; margin-bottom: 10px; }
