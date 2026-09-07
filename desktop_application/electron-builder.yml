@@ -3,7 +3,7 @@ productName: AquaLoRa Desktop
 directories:
   buildResources: build
   output: dist
-icon: build/icon.png
+icon: build/icon.ico
 files:
   - '!**/.vscode/*'
   - '!src/*'
