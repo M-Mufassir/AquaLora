@@ -69,5 +69,9 @@
 #define WIFI_AP_SSID "AquaLoRa-MasterNode" ///< Wi-Fi AP SSID for Dashboard Pairing
 #define WIFI_AP_PASSWORD "aqualora123"     ///< Wi-Fi Password & AES-256 Key Seed
 #define WEBSOCKET_PORT 8081                ///< WebSocket Server Port (ws://192.168.4.1:8081)
+#define UDP_DISCOVERY_PORT 8082            ///< Desktop discovery beacon port
+#define MASTER_NODE_ID "master-node"       ///< Stable gateway identity
+#define MASTER_NODE_CODE "AQL-001"         ///< Provisioned gateway code
+#define DISCOVERY_INTERVAL_MS 3000         ///< UDP presence beacon interval
 
 #endif // CONFIG_H

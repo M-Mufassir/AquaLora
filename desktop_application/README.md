@@ -1,5 +1,7 @@
 # AquaLoRa Dashboard
 
+> Current workflow: pairing another Master Node preserves existing local nodes, readings, alerts, and outbox data. See [CURRENT_WORKFLOW.md](../CURRENT_WORKFLOW.md).
+
 Desktop dashboard application for **AquaLoRa** — a LoRa-based, solar-powered IoT system for real-time water quality monitoring and early-warning protection of fish and prawn ponds.
 
 ## Running On Windows

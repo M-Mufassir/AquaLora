@@ -1,5 +1,7 @@
 # AquaLoRa
 
+> Current workflow: see [CURRENT_WORKFLOW.md](CURRENT_WORKFLOW.md). It is the authoritative description of startup, multi-gateway pairing, local persistence, and cloud history import.
+
 **LoRa-Based Smart Fish Farm Monitoring and Protection System Using IoT**
 
 A solar-powered, offline-capable water quality monitoring system for small-scale aquaculture in Sri Lanka. Built as an SLIIT IE3044 Design Project.

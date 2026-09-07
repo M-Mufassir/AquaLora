@@ -1,115 +1,94 @@
-# Master Node Firmware — AquaLoRa Marine Telemetry System
+# AquaLoRa Master Node Firmware
 
-Production firmware for the office gateway Master Node unit (**SLIIT IE3044 Design Project**).
+This folder contains the production gateway firmware. It receives real LoRa packets from Slave Nodes, renders the latest packet on the OLED, and forwards telemetry to the AquaLoRa desktop application.
 
----
-
-## 1. System Overview
-
-The Master Node acts as the gateway between the pond-side slave nodes and the desktop application:
-
-1. **LoRa Receiver**: Receives 433 MHz RF packets over SPI from Slave Nodes (`"slave-01,25.40,320,1.50"`).
-2. **OLED Display Driver**: Renders live telemetry metrics and system status directly to a 1.3" SH1106 / 0.96" SSD1306 OLED screen (I2C).
-3. **External WiFi / WebSocket Gateway**: Connects to a normal farm or office WiFi network and exposes an AES-256-GCM encrypted WebSocket endpoint such as `ws://192.168.1.50:8081` for the desktop dashboard.
-
-This is the final deployment model used in the project: the Master Node joins an external WiFi network instead of depending on the ESP32 AP alone. The desktop app then connects to the Master Node over the LAN and syncs local readings to the cloud backend as a secondary backup.
-
----
-
-## 2. Directory Structure
+## Production data path
 
 ```text
-master_node/
-├── AquaLoRa_MasterNode/         Production Master Node Firmware (LoRa SPI + OLED + Wi-Fi AP + AES-256-GCM)
-│   ├── AquaLoRa_MasterNode.ino  Main sketch (Setup AP, OLED, LoRa & Dual Processing Loop)
-│   ├── config.h                 Hardware pinouts, Wi-Fi credentials & RF frequency settings
-│   ├── display.h                OLED display driver (SH1106 page mode & SSD1306 support)
-│   ├── lora_receiver.h          SX1278 SPI driver & comma-separated payload parser
-│   └── secure_ws.h              AES-256-GCM mbedtls cipher & WebSocketsServer gateway
-│
-├── AquaLoRa_MasterNode_Dummy/   Dev Mock Stand-in (Simulated telemetry without LoRa HW)
-└── README.md                    This documentation file
+Slave sensors -> SX1278/RA-02 LoRa -> ESP32 Master Node
+              -> AES-256-GCM WebSocket -> Desktop SQLite/cloud sync
+              -> UDP discovery beacon (port 8082)
 ```
 
----
+The WebSocket protocol is compatible with the tested dummy firmware and desktop application. The production difference is that `lora_receiver.h` parses real LoRa packets instead of generating random values.
 
-## 3. Hardware Pinout & Specs
+## Files
 
-| Component        | Function | ESP32 GPIO | Description                      |
-| :--------------- | :------- | :--------- | :------------------------------- |
-| **Ra-02 LoRa**   | SPI SCK  | `GPIO 18`  | Hardware SPI Clock               |
-| **Ra-02 LoRa**   | SPI MISO | `GPIO 19`  | Hardware SPI Master In Slave Out |
-| **Ra-02 LoRa**   | SPI MOSI | `GPIO 23`  | Hardware SPI Master Out Slave In |
-| **Ra-02 LoRa**   | SPI NSS  | `GPIO 5`   | SPI Chip Select Line             |
-| **Ra-02 LoRa**   | Reset    | `GPIO 27`  | LoRa Reset Line                  |
-| **Ra-02 LoRa**   | DIO0     | `GPIO 13`  | LoRa Interrupt Line              |
-| **OLED Display** | I2C SDA  | `GPIO 21`  | Hardware I2C Data                |
-| **OLED Display** | I2C SCL  | `GPIO 22`  | Hardware I2C Clock               |
+| File | Responsibility |
+|---|---|
+| `AquaLoRa_MasterNode.ino` | Initializes Wi-Fi, WebSocket, OLED, and LoRa; runs the loop |
+| `config.h` | Pins, RF settings, Wi-Fi mode, gateway identity, discovery settings |
+| `lora_receiver.h` | SX1278 setup and LoRa telemetry parsing |
+| `secure_ws.h` | AES-256-GCM WebSocket gateway, node registry, commands, UDP discovery |
+| `display.h` | SH1106/SSD1306 OLED rendering |
 
----
+`AquaLoRa_MasterNode_Dummy` is retained only as a desktop integration fixture. It is not the firmware to flash for a real installation.
 
-## 4. Encryption & Communication Protocol
+## Hardware
 
-- **Wi-Fi Access Point**: SSID `AquaLoRa-MasterNode`, Password `aqualora123`.
-- **WebSocket Server**: Port `8081` at gateway IP `192.168.4.1`.
-- **AES-256-GCM Encryption**: Every message is encrypted using `mbedtls` with a 256-bit key derived via `SHA-256("aqualora123")`.
-- **JSON Data Contract**:
-  ```json
-  {
-    "node_id": "slave-01",
-    "timestamp": "2026-08-22T12:00:00Z",
-    "temperature": 28.5,
-    "turbidity": 35.2,
-    "tds": 220,
-    "battery_pct": 95,
-    "rssi": -62
-  }
-  ```
-- **Base64 JSON Envelope**:
-  ```json
-  {
-    "iv": "base64_iv_12_bytes",
-    "tag": "base64_tag_16_bytes",
-    "data": "base64_ciphertext"
-  }
-  ```
+| Device | ESP32 pin |
+|---|---:|
+| LoRa SCK / MISO / MOSI | 18 / 19 / 23 |
+| LoRa NSS / RESET / DIO0 | 5 / 27 / 13 |
+| OLED SDA / SCL | 21 / 22 |
 
----
+The RA-02 and Slave Node must use identical RF settings: 433 MHz, 125 kHz bandwidth, SF7, coding rate 4/5, and sync word `0xF3`.
 
-## 5. Setup & Compilation
+## LoRa payload contract
 
-1. **Arduino IDE**: File → Preferences → Additional Boards Manager URLs, add:
-   `https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json`
-2. **Install Required Libraries**:
-   - `WebSockets` by Markus Sattler (Links2004)
-   - `ArduinoJson` by Benoit Blanchon
-   - `LoRa` by Sandeep Mistry
-   - `Adafruit GFX Library` & `Adafruit SSD1306`
-3. Open `AquaLoRa_MasterNode/AquaLoRa_MasterNode.ino`.
-4. Select board **ESP32 Dev Module**, select COM port, and click **Upload**.
-5. Open Serial Monitor at **115200 baud** to view boot logs.
+The parser accepts:
 
----
+```text
+node_id,temperature,tds,turbidity,ph
+```
 
-## 6. Pairing with Dashboard App
+It also accepts the legacy four-field form and defaults pH to `7.0`:
 
-### External WiFi / router mode (final production path)
+```text
+node_id,temperature,tds,turbidity
+```
 
-1. Configure the ESP32 to join an external WiFi router by setting:
-   - `WIFI_USE_EXTERNAL_NETWORK 1`
-   - `EXTERNAL_WIFI_SSID = "YourRouterSSID"`
-   - `EXTERNAL_WIFI_PASSWORD = "YourRouterPassword"`
-2. Flash the firmware and power the ESP32.
-3. The ESP32 joins the router and assigns itself a LAN IP, for example `192.168.1.50`.
-4. In the desktop app, open **Settings → Connection** and set:
-   - WiFi SSID = the same external WiFi network
-   - WiFi password = router password
-   - Master Node URL = `ws://192.168.1.50:8081`
-   - Cloud backup URL = `https://aqualora.up.railway.app`
-5. The desktop app connects to the Master Node over the router and begins local monitoring plus cloud sync.
+Example: `slave-01,28.50,220,35.20,7.40`.
 
-This is the final architecture for the project: normal office/farm WiFi for the Master Node, local SQLite as the operational database, and the Railway backend as a cloud backup layer.
+The gateway adds the UTC timestamp and LoRa RSSI, then sends desktop-compatible JSON containing `node_id`, `timestamp`, `temperature`, `turbidity`, `tds`, `ph`, `battery_pct`, and `rssi`. Battery is currently `95` because the existing LoRa payload has no battery field.
 
-### AP mode (legacy / fallback)
+## Wi-Fi and security
 
-AP mode is still supported as a fallback and troubleshooting mode, but it is no longer the primary deployment method for the final system. In AP mode, the ESP32 creates its own network and serves the dashboard at `ws://192.168.4.1:8081`.
+The default AP configuration is:
+
+- SSID: `AquaLoRa-MasterNode`
+- Password: `aqualora123`
+- WebSocket: `ws://192.168.4.1:8081`
+- UDP discovery: port `8082`
+
+For router deployment, set `WIFI_USE_EXTERNAL_NETWORK` to `1` and configure the external credentials. If the router is unavailable, the firmware falls back to AP mode. WebSocket messages use the shared AES-256-GCM `{ "iv", "tag", "data" }` envelope with a SHA-256 key derived from the Wi-Fi password.
+
+## Build and flash
+
+Install the ESP32 Arduino board package and these libraries:
+
+- WebSockets by Markus Sattler
+- ArduinoJson by Benoit Blanchon
+- LoRa by Sandeep Mistry
+- Adafruit GFX Library
+- Adafruit SSD1306
+
+Open `AquaLoRa_MasterNode/AquaLoRa_MasterNode.ino`, select **ESP32 Dev Module**, upload, and monitor at **115200 baud**.
+
+Before field deployment:
+
+1. Confirm wiring and antenna connection.
+2. Match RF settings with the Slave Node.
+3. Change the default Wi-Fi password.
+4. Configure router credentials if using station mode.
+5. Confirm OLED and LoRa initialization messages.
+6. Send a real Slave Node packet and verify parsed values in Serial Monitor.
+7. Pair the desktop using discovery or the WebSocket URL.
+
+## Desktop pairing
+
+The gateway broadcasts an unencrypted UDP presence beacon every three seconds. On WebSocket connection it sends a `node_list` message, then broadcasts each received LoRa reading to connected desktop clients. The desktop stores readings locally and does not require cloud connectivity. Pairing another Master Node does not erase existing local telemetry.
+
+## Current limitation
+
+Battery percentage is a gateway fallback (`95`) because the current LoRa packet contract has no battery field. Add that field to the Slave Node contract before replacing the fallback.

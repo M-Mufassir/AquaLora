@@ -9,6 +9,7 @@
 
 #include <Arduino.h>
 #include <WiFi.h>
+#include <WiFiUdp.h>
 #include <WebSocketsServer.h>
 #include <ArduinoJson.h>
 #include <time.h>
@@ -38,6 +39,8 @@ static const size_t GCM_TAG_LEN = 16;
 static const size_t MAX_PLAINTEXT_LEN = 256;
 
 static unsigned long g_samplingIntervalMs = 10000;
+static WiFiUDP g_discoveryUdp;
+static unsigned long g_lastDiscoveryMs = 0;
 
 /**
  * @brief Register or update a discovered LoRa node ID in local registry.
@@ -248,13 +251,7 @@ inline void sendNodeListWS(uint8_t clientId)
     doc["type"] = "node_list";
     JsonArray arr = doc.createNestedArray("nodes");
 
-    if (g_discoveredNodeCount == 0)
-    {
-        // Fallback default node if no LoRa node discovered yet
-        JsonObject o = arr.createNestedObject();
-        o["node_id"] = "slave-01";
-    }
-    else
+    if (g_discoveredNodeCount > 0)
     {
         for (int i = 0; i < g_discoveredNodeCount; i++)
         {
@@ -351,9 +348,7 @@ inline bool initSecureWebSocket()
     seedFakeClock();
     randomSeed(esp_random());
     initCipher();
-
-    // Default slave node pre-registration
-    registerNode("slave-01");
+    WiFi.setSleep(false);
 
 #if WIFI_USE_EXTERNAL_NETWORK
     WiFi.mode(WIFI_STA);
@@ -396,6 +391,9 @@ inline bool initSecureWebSocket()
     Serial.printf("[WIFI] Master Node AP Gateway IP: %s\n", WiFi.softAPIP().toString().c_str());
 #endif
 
+    g_discoveryUdp.begin(UDP_DISCOVERY_PORT);
+    Serial.printf("[DISCOVERY] UDP presence beacons enabled on port %u\n", UDP_DISCOVERY_PORT);
+
     g_webSocket.begin();
     g_webSocket.onEvent(webSocketEvent);
     Serial.printf("[WS] WebSocket Server listening on port %u (AES-256-GCM Encrypted)\n", WEBSOCKET_PORT);
@@ -408,6 +406,24 @@ inline bool initSecureWebSocket()
 inline void processWebSocket()
 {
     g_webSocket.loop();
+    const unsigned long now = millis();
+    if (now - g_lastDiscoveryMs >= DISCOVERY_INTERVAL_MS)
+    {
+        g_lastDiscoveryMs = now;
+        StaticJsonDocument<256> beacon;
+        beacon["service"] = "aqualora-master";
+        beacon["id"] = MASTER_NODE_ID;
+        beacon["code"] = MASTER_NODE_CODE;
+        beacon["ip"] = (WiFi.getMode() & WIFI_STA) ? WiFi.localIP().toString() : WiFi.softAPIP().toString();
+        beacon["port"] = WEBSOCKET_PORT;
+        beacon["mode"] = (WiFi.getMode() & WIFI_STA) ? "STA" : "AP";
+        String payload;
+        serializeJson(beacon, payload);
+        IPAddress broadcast = (WiFi.getMode() & WIFI_STA) ? IPAddress(255, 255, 255, 255) : IPAddress(192, 168, 4, 255);
+        g_discoveryUdp.beginPacket(broadcast, UDP_DISCOVERY_PORT);
+        g_discoveryUdp.write((const uint8_t *)payload.c_str(), payload.length());
+        g_discoveryUdp.endPacket();
+    }
 }
 
 #endif // SECURE_WS_H
