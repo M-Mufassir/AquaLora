@@ -23,6 +23,7 @@ interface CsvExportResult {
 
 // Custom APIs for renderer
 const api = {
+  openExternal: (url: string): Promise<void> => ipcRenderer.invoke('shell:openExternal', url),
   onReading: (callback: (reading: Reading) => void): (() => void) => {
     const listener = (_event: Electron.IpcRendererEvent, reading: Reading): void =>
       callback(reading)

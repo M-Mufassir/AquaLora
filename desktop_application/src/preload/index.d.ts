@@ -20,6 +20,7 @@ interface CsvExportResult {
 }
 
 interface AquaLoraApi {
+  openExternal: (url: string) => Promise<void>
   onReading: (callback: (reading: Reading) => void) => () => void
   getRecentReadings: (nodeId: string, limit?: number) => Promise<StoredReading[]>
   getLatestReadingsByNode: () => Promise<Record<string, StoredReading>>

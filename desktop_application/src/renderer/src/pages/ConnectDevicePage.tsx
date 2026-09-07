@@ -39,6 +39,7 @@ function ConnectDevicePage({ onComplete, isOnboarding = false }: ConnectDevicePa
   const [connectSuccess, setConnectSuccess] = useState(false)
   const [isNewNodeWarning, setIsNewNodeWarning] = useState(false)
   const [previousNodeCode, setPreviousNodeCode] = useState<string | null>(null)
+  const [adminPortalUrl, setAdminPortalUrl] = useState<string | null>(null)
 
   const unsubscribeDiscoveryRef = useRef<(() => void) | null>(null)
 
@@ -194,11 +195,14 @@ function ConnectDevicePage({ onComplete, isOnboarding = false }: ConnectDevicePa
         cloudUrl: cloudUrl.trim() || undefined
       })
 
-      setStatusMessage(
-        false
-          ? '🔄 New node detected — local data reset. ' + (result.message || 'Initializing dashboard…')
-          : result.message || 'ESP32 paired! Initializing Dashboard…'
-      )
+      if (result.session?.role === 'super_admin') {
+        const portalUrl = (cloudUrl.trim() || 'https://aqualora.up.railway.app/api').replace(/\/api\/?$/, '')
+        setAdminPortalUrl(portalUrl)
+        setIsConnectingDevice(false)
+        return
+      }
+
+      setStatusMessage(result.message || 'Master Node paired and added to local gateway.')
 
       let statusTimer: NodeJS.Timeout | null = null
 
@@ -241,6 +245,22 @@ function ConnectDevicePage({ onComplete, isOnboarding = false }: ConnectDevicePa
 
   return (
     <div className={`page connect-page ${isOnboarding ? 'onboarding-mode' : ''}`} style={isOnboarding ? { margin: '40px auto', maxWidth: '620px' } : {}}>
+      {adminPortalUrl && (
+        <div className="admin-redirect-modal" role="dialog" aria-modal="true" aria-labelledby="admin-redirect-title">
+          <div className="admin-redirect-card">
+            <div className="admin-redirect-icon">🔐</div>
+            <h2 id="admin-redirect-title">Administrator account detected</h2>
+            <p>The desktop application is for facility operators. Administrator accounts must use the AquaLoRa web administration console.</p>
+            <button className="apply-btn admin-redirect-primary" onClick={() => void window.api.openExternal(adminPortalUrl)}>
+              Open web admin console
+            </button>
+            <p className="admin-redirect-url">{adminPortalUrl}</p>
+            <button className="admin-redirect-secondary" onClick={() => { setAdminPortalUrl(null); void window.api.cloudLogout() }}>
+              Return to desktop login
+            </button>
+          </div>
+        </div>
+      )}
       {isOnboarding && (
         <div style={{ textAlign: 'center', marginBottom: '24px' }}>
           <h1 style={{ fontSize: '28px', color: '#4aa8ff', margin: 0, fontWeight: 800 }}>AquaLoRa</h1>

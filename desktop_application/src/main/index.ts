@@ -288,6 +288,11 @@ app.whenReady().then(() => {
     return user?.role === 'admin' ? null : user
   })
 
+  ipcMain.handle('shell:openExternal', async (_event, url: string) => {
+    if (!/^https:\/\//i.test(url)) throw new Error('Only HTTPS links can be opened.')
+    await shell.openExternal(url)
+  })
+
   ipcMain.handle(
     'auth:setupMasterNodeSession',
     async (
@@ -312,9 +317,6 @@ app.whenReady().then(() => {
       // 1. Detect if this is a new (different) Master Node — if so, reset local telemetry data
       const previousNodeCode = getSettingOptional('master_node_code')
       const isNewNode = !!previousNodeCode && previousNodeCode !== nodeCode
-      if (isNewNode) {
-        console.log(`[auth:setupMasterNodeSession] New node detected (was: ${previousNodeCode}, now: ${nodeCode}). Resetting local database.`)
-      }
 
       // 2. Save settings
       setSetting('master_node_code', nodeCode)

@@ -181,6 +181,15 @@ code {
   justify-content: center;
 }
 
+.admin-redirect-modal { position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center; padding: 24px; background: rgba(2, 11, 15, 0.72); backdrop-filter: blur(8px); }
+.admin-redirect-card { width: min(100%, 460px); padding: 30px; border: 1px solid var(--color-border); border-radius: 20px; background: var(--color-background-soft); color: var(--ev-c-text-1); text-align: center; box-shadow: 0 24px 70px rgba(0, 0, 0, 0.35); }
+.admin-redirect-icon { font-size: 34px; margin-bottom: 10px; }
+.admin-redirect-card h2 { margin: 0 0 10px; font-size: 22px; }
+.admin-redirect-card p { color: var(--ev-c-text-2); line-height: 1.55; }
+.admin-redirect-primary { width: 100%; margin-top: 14px; }
+.admin-redirect-url { overflow-wrap: anywhere; font-size: 11px; }
+.admin-redirect-secondary { margin-top: 8px; border: 0; background: transparent; color: var(--ev-c-text-2); cursor: pointer; font-size: 12px; }
+
 .login-form {
   display: flex;
   flex-direction: column;
