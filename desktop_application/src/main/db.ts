@@ -334,6 +334,67 @@ export function getRecentReadings(nodeId: string, limit = 50): StoredReading[] {
     .all(nodeId, limit) as StoredReading[]
 }
 
+/**
+ * Returns the latest stored reading for every distinct node in SQLite.
+ * Used on startup to populate node cards immediately.
+ */
+export function getLatestReadingsForAllNodes(): Record<string, StoredReading> {
+  const rows = db
+    .prepare(
+      `SELECT r.* FROM readings r
+       INNER JOIN (
+         SELECT node_id, MAX(timestamp) as max_time
+         FROM readings
+         GROUP BY node_id
+       ) latest ON r.node_id = latest.node_id AND r.timestamp = latest.max_time`
+    )
+    .all() as StoredReading[]
+
+  const map: Record<string, StoredReading> = {}
+  for (const row of rows) {
+    map[row.node_id] = row
+  }
+  return map
+}
+
+/**
+ * Inserts historical readings in batch while ignoring records that already exist
+ * (matching node_id and timestamp) without creating duplicate outbox queues.
+ */
+export function batchInsertHistoricalReadings(readings: Reading[]): number {
+  if (readings.length === 0) return 0
+  const insertStmt = db.prepare(
+    `INSERT INTO readings (node_id, timestamp, temperature, turbidity, tds, ph, pond_type)
+     SELECT @node_id, @timestamp, @temperature, @turbidity, @tds, @ph, @pond_type
+     WHERE NOT EXISTS (
+       SELECT 1 FROM readings WHERE node_id = @node_id AND timestamp = @timestamp
+     )`
+  )
+
+  const tx = db.transaction((items: Reading[]) => {
+    let count = 0
+    for (const r of items) {
+      const enriched = {
+        node_id: r.node_id,
+        timestamp: r.timestamp,
+        temperature: r.temperature,
+        turbidity: r.turbidity,
+        tds: r.tds,
+        ph: r.ph,
+        pond_type: (r as any).pond_type ?? 'tilapia'
+      }
+      const res = insertStmt.run(enriched)
+      if (res.changes > 0) {
+        count++
+        upsertNodeStub(r.node_id)
+      }
+    }
+    return count
+  })
+
+  return tx(readings)
+}
+
 export function getReadingsInRange(
   nodeId: string,
   startIso: string,

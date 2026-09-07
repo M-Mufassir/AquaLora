@@ -22,6 +22,7 @@ interface CsvExportResult {
 interface AquaLoraApi {
   onReading: (callback: (reading: Reading) => void) => () => void
   getRecentReadings: (nodeId: string, limit?: number) => Promise<StoredReading[]>
+  getLatestReadingsByNode: () => Promise<Record<string, StoredReading>>
   getReadingsInRange: (nodeId: string, startIso: string, endIso: string) => Promise<StoredReading[]>
   exportReadingsCsv: (nodeId: string, startIso: string, endIso: string) => Promise<CsvExportResult>
   onScore: (callback: (score: Score) => void) => () => void

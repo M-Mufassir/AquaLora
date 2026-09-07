@@ -194,9 +194,8 @@ function ConnectDevicePage({ onComplete, isOnboarding = false }: ConnectDevicePa
         cloudUrl: cloudUrl.trim() || undefined
       })
 
-      const isNewNode = (result as any).isNewNode as boolean | undefined
       setStatusMessage(
-        isNewNode
+        false
           ? '🔄 New node detected — local data reset. ' + (result.message || 'Initializing dashboard…')
           : result.message || 'ESP32 paired! Initializing Dashboard…'
       )

@@ -8,6 +8,8 @@ import {
   insertReading,
   upsertNodeFromReading,
   getRecentReadings,
+  getLatestReadingsForAllNodes,
+  batchInsertHistoricalReadings,
   getReadingsInRange,
   readingsToCsv,
   insertAlert,
@@ -69,6 +71,43 @@ const NETWORK_CHECK_TIMEOUT_MS = 5_000
 let mainWindow: BrowserWindow
 const masterNodeClient = new MasterNodeClient()
 const decisionEngine = new DecisionEngine()
+
+async function fetchPastTelemetryFromCloud(nodeCode: string, token: string, cloudUrl: string): Promise<void> {
+  if (!token || token.startsWith('local-session-')) return
+  try {
+    const headers = { Authorization: `Bearer ${token}` }
+    const [historyResponse, nodesResponse] = await Promise.all([
+      fetch(resolveCloudUrl('/readings/history?limit=200', cloudUrl), { headers }),
+      fetch(resolveCloudUrl('/nodes', cloudUrl), { headers })
+    ])
+    if (nodesResponse.ok) {
+      const payload = (await nodesResponse.json()) as any
+      const cloudNodes = Array.isArray(payload) ? payload : payload.nodes ?? payload.data ?? []
+      for (const cloudNode of cloudNodes) {
+        const id = cloudNode.node_id ?? cloudNode.id
+        if (!id) continue
+        const localNode = upsertNodeStub(String(id))
+        if (cloudNode.name || cloudNode.display_name || cloudNode.location) {
+          upsertNode(String(id), cloudNode.name ?? cloudNode.display_name ?? localNode.name ?? String(id), cloudNode.location ?? localNode.location ?? '')
+        }
+        if (cloudNode.pond_type) setNodePondType(String(id), cloudNode.pond_type)
+        if (cloudNode.custom_profile) setNodeCustomProfile(String(id), cloudNode.custom_profile)
+        mainWindow?.webContents.send('node:updated', getAllNodes().find((n) => n.id === String(id)) ?? localNode)
+      }
+    }
+    if (historyResponse.ok) {
+      const payload = (await historyResponse.json()) as any
+      const rows = Array.isArray(payload) ? payload : payload.readings ?? payload.data ?? []
+      const readings = rows.map((row: any) => ({ ...row, node_id: row.node_id ?? row.nodeId, timestamp: row.timestamp ?? row.created_at }))
+        .filter((row: any) => row.node_id && row.timestamp && row.temperature != null)
+        .filter((row: any) => !row.master_node_code || row.master_node_code === nodeCode)
+      batchInsertHistoricalReadings(readings)
+      for (const reading of readings) mainWindow?.webContents.send('reading:new', reading)
+    }
+  } catch (error: any) {
+    console.warn('[cloud] historical telemetry fetch skipped:', error.message)
+  }
+}
 
 async function getCloudAuthToken(): Promise<string | null> {
   const session = loadCloudSession()
@@ -275,7 +314,6 @@ app.whenReady().then(() => {
       const isNewNode = !!previousNodeCode && previousNodeCode !== nodeCode
       if (isNewNode) {
         console.log(`[auth:setupMasterNodeSession] New node detected (was: ${previousNodeCode}, now: ${nodeCode}). Resetting local database.`)
-        resetLocalNodeData()
       }
 
       // 2. Save settings
@@ -439,6 +477,7 @@ app.whenReady().then(() => {
       }
 
       saveCloudSession(session)
+      void fetchPastTelemetryFromCloud(nodeCode, session.token, cloudUrl)
       return {
         session,
         user: { username: session.nodeCode, role: session.role === 'super_admin' ? 'operator' : (session.role || 'operator') },
@@ -459,6 +498,7 @@ app.whenReady().then(() => {
   ipcMain.handle('readings:getRecent', (_event, nodeId: string, limit?: number) =>
     getRecentReadings(nodeId, limit)
   )
+  ipcMain.handle('readings:getLatestByNode', () => getLatestReadingsForAllNodes())
 
   ipcMain.handle('readings:getRange', (_event, nodeId: string, startIso: string, endIso: string) =>
     getReadingsInRange(nodeId, startIso, endIso)

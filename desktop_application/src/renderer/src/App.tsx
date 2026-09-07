@@ -88,6 +88,11 @@ function App(): React.JSX.Element {
 
     window.api.getAllNodes().then((nodes) => {
       setKnownNodes(nodes)
+      window.api.getLatestReadingsByNode().then((latest) => {
+        Object.values(latest).forEach((reading) =>
+          setReading({ ...reading, battery_pct: 0, rssi: 0 })
+        )
+      })
       setNodesLoaded(true)
     })
     window.api.getAllRecentAlerts().then(setAlerts)

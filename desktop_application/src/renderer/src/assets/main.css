@@ -307,16 +307,16 @@ code {
 }
 
 .gauge.gauge-sm .gauge-ring {
-  width: 92px;
-  height: 92px;
+  width: 68px;
+  height: 68px;
 }
 
 .gauge.gauge-sm .gauge-number {
-  font-size: 12px;
+  font-size: 10px;
 }
 
 .gauge.gauge-sm .gauge-label {
-  font-size: 10px;
+  font-size: 9px;
 }
 
 /* Tabs */
@@ -848,11 +848,13 @@ code {
 
 .node-summary-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
   gap: 18px;
 }
 
 .node-summary-card {
+  box-sizing: border-box;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -897,18 +899,25 @@ code {
 }
 
 .node-summary-title-wrap {
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 
 .node-summary-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-weight: 700;
   font-size: 17px;
   color: var(--ev-c-text-1);
 }
 
 .node-summary-subtitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 12px;
   color: var(--ev-c-text-2);
 }
@@ -946,9 +955,10 @@ code {
 }
 
 .node-summary-gauges {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  min-width: 0;
 }
 
 .node-summary-meta {

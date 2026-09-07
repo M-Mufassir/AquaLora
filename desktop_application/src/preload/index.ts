@@ -31,6 +31,8 @@ const api = {
   },
   getRecentReadings: (nodeId: string, limit?: number): Promise<StoredReading[]> =>
     ipcRenderer.invoke('readings:getRecent', nodeId, limit),
+  getLatestReadingsByNode: (): Promise<Record<string, StoredReading>> =>
+    ipcRenderer.invoke('readings:getLatestByNode'),
   getReadingsInRange: (
     nodeId: string,
     startIso: string,
