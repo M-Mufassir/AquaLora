@@ -24,13 +24,13 @@ static uint8_t g_oledI2CAddr = OLED_I2C_ADDRESS;
  * @return Discovered I2C address (0x3C, 0x3D, or 0x00 if not found).
  */
 inline uint8_t scanI2COLEDAddress() {
-    Serial.println(F("[I2C SCAN] Scanning I2C bus on SDA (GPIO 21) & SCL (GPIO 22)..."));
+    DEBUG_PRINTLN(F("[I2C SCAN] Scanning I2C bus..."));
     uint8_t foundAddr = 0x00;
     
     for (uint8_t addr = 1; addr < 127; addr++) {
         Wire.beginTransmission(addr);
         if (Wire.endTransmission() == 0) {
-            Serial.printf("[I2C SCAN] Found I2C device at address 0x%02X!\n", addr);
+            DEBUG_PRINTF("[I2C SCAN] Found I2C device at address 0x%02X!\n", addr);
             if (addr == 0x3C || addr == 0x3D) {
                 foundAddr = addr;
             }
@@ -38,8 +38,8 @@ inline uint8_t scanI2COLEDAddress() {
     }
     
     if (foundAddr == 0x00) {
-        Serial.println(F("[I2C SCAN] WARNING: No OLED display detected on I2C bus!"));
-        Serial.println(F("[I2C SCAN] DIAGNOSTICS: Check VCC (3.3V), GND, SDA (21), SCL (22) jumper wires."));
+        DEBUG_PRINTLN(F("[I2C SCAN] WARNING: No OLED display detected on I2C bus!"));
+        DEBUG_PRINTLN(F("[I2C SCAN] DIAGNOSTICS: Check VCC (3.3V), GND, SDA, SCL jumper wires."));
     }
     return foundAddr;
 }
@@ -112,12 +112,12 @@ inline void renderDisplayHardware() {
 }
 
 /**
- * @brief Initialize the OLED Display over Wire I2C (GPIO 21 SDA, GPIO 22 SCL).
+ * @brief Initialize the OLED Display over Wire I2C (GPIO 1/21 SDA, GPIO 22 SCL).
  * Supports both 1.3" SH1106 and 0.96" SSD1306 OLED displays.
  * @return True if display initialized successfully.
  */
 inline bool initDisplay() {
-    Serial.println(F("[OLED] Initializing I2C bus and OLED display driver..."));
+    DEBUG_PRINTLN(F("[OLED] Initializing I2C bus and OLED display driver..."));
     
     // Step 1: Start I2C bus at standard 100 kHz speed
     Wire.begin(OLED_SDA, OLED_SCL);
@@ -134,18 +134,18 @@ inline bool initDisplay() {
     bool success = display.begin(SSD1306_SWITCHCAPVCC, g_oledI2CAddr, true, false);
     if (!success) {
         uint8_t altAddr = (g_oledI2CAddr == 0x3C) ? 0x3D : 0x3C;
-        Serial.printf("[OLED] Retrying GFX initialization at 0x%02X...\n", altAddr);
+        DEBUG_PRINTF("[OLED] Retrying GFX initialization at 0x%02X...\n", altAddr);
         success = display.begin(SSD1306_SWITCHCAPVCC, altAddr, true, false);
         if (success) g_oledI2CAddr = altAddr;
     }
 
     if (!success) {
-        Serial.println(F("[OLED] ERROR: Display GFX allocation failed!"));
+        DEBUG_PRINTLN(F("[OLED] ERROR: Display GFX allocation failed!"));
         return false;
     }
 
 #if IS_SH1106_DISPLAY
-    Serial.println(F("[OLED] Configuring 1.3\" SH1106 controller hardware registers..."));
+    DEBUG_PRINTLN(F("[OLED] Configuring 1.3\" SH1106 controller hardware registers..."));
     initSH1106Hardware(g_oledI2CAddr);
 #endif
 
@@ -169,14 +169,15 @@ inline bool initDisplay() {
     display.println(F("Listening on 433MHz "));
     renderDisplayHardware();
 
-    Serial.println(F("[OLED] 1.3\" SH1106 OLED Display initialized successfully!"));
+    DEBUG_PRINTLN(F("[OLED] OLED Display initialized successfully!"));
     return true;
 }
 
 /**
  * @brief Live Refresh OLED Display with freshly received LoRa telemetry data.
+ * Displays all 4 parameters: Temp, pH, TDS, Turbidity along with RSSI and Packet Count.
  */
-inline void updateDisplayLive(const String &nodeId, float temp, int tds, float turb, int rssi, float snr, uint32_t packetCount) {
+inline void updateDisplayLive(const String &nodeId, float temp, int tds, float turb, float ph, int rssi, float snr, uint32_t packetCount) {
     display.clearDisplay();
     
     // Top Banner Header
@@ -190,17 +191,17 @@ inline void updateDisplayLive(const String &nodeId, float temp, int tds, float t
     display.setCursor(0, 14);
     display.printf("%s | RSSI:%ddBm", nodeId.c_str(), rssi);
 
-    // Row 2: Temperature Reading
+    // Row 2: Temperature & pH Reading
     display.setCursor(0, 26);
-    display.printf("Temp : %.2f C", temp);
+    display.printf("Tmp: %.1f C | pH: %.2f", temp, ph);
 
     // Row 3: TDS Reading
     display.setCursor(0, 38);
-    display.printf("TDS  : %d ppm", tds);
+    display.printf("TDS: %d ppm", tds);
 
     // Row 4: Turbidity Reading
     display.setCursor(0, 50);
-    display.printf("Turb : %.2f NTU", turb);
+    display.printf("Turb: %.1f NTU", turb);
 
     // Render immediately to hardware screen
     renderDisplayHardware();

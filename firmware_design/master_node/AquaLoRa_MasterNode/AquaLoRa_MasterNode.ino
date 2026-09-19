@@ -21,34 +21,36 @@
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 void setup() {
-    // Initialize Serial Debug Console
+    // Initialize Serial Debug Console (disabled if SDA is on GPIO 1 / TX0 to prevent UART collision)
+#if ENABLE_SERIAL_DEBUG
     Serial.begin(SERIAL_BAUD);
     delay(100);
-    Serial.println(F("\n=================================================="));
-    Serial.println(F("    AquaLoRa Master Node Firmware Starting...     "));
-    Serial.println(F("=================================================="));
+    DEBUG_PRINTLN(F("\n=================================================="));
+    DEBUG_PRINTLN(F("    AquaLoRa Master Node Firmware Starting...     "));
+    DEBUG_PRINTLN(F("=================================================="));
+#endif
 
     // Step 1: Initialize Wi-Fi AP & AES-256-GCM Encrypted WebSocket Server
     bool wsOK = initSecureWebSocket();
     if (!wsOK) {
-        Serial.println(F("[BOOT] WARNING: Wi-Fi AP / WebSocket server failed to initialize!"));
+        DEBUG_PRINTLN(F("[BOOT] WARNING: Wi-Fi AP / WebSocket server failed to initialize!"));
     }
 
-    // Step 2: Initialize 0.96" SSD1306 / 1.3" SH1106 OLED Display (GPIO 21 SDA, GPIO 22 SCL)
+    // Step 2: Initialize 0.96" SSD1306 / 1.3" SH1106 OLED Display (GPIO 1 or 21 SDA, GPIO 22 SCL)
     bool displayOK = initDisplay();
     if (!displayOK) {
-        Serial.println(F("[BOOT] WARNING: OLED display failed to initialize. Continuing Serial mode."));
+        DEBUG_PRINTLN(F("[BOOT] WARNING: OLED display failed to initialize. Continuing Serial mode."));
     }
 
     // Step 3: Initialize Ra-02 (SX1278) LoRa Transceiver (SPI: 18, 19, 23, 5, 27, 13)
     bool loraOK = initLoRaMaster();
     if (!loraOK) {
-        Serial.println(F("[BOOT] CRITICAL ERROR: Ra-02 LoRa failed to initialize!"));
+        DEBUG_PRINTLN(F("[BOOT] CRITICAL ERROR: Ra-02 LoRa failed to initialize!"));
         showDisplayError("LoRa Ra-02 Init Fail!\nCheck SPI Pinout\nSCK:18, MISO:19\nMOSI:23, NSS:5");
     } else {
-        Serial.println(F("[BOOT] Master Node system setup complete. Listening for LoRa telemetry & WebSocket clients..."));
+        DEBUG_PRINTLN(F("[BOOT] Master Node system setup complete. Listening for LoRa telemetry & WebSocket clients..."));
     }
-    Serial.println(F("==================================================\n"));
+    DEBUG_PRINTLN(F("==================================================\n"));
 }
 
 void loop() {

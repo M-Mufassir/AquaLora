@@ -251,7 +251,13 @@ inline void sendNodeListWS(uint8_t clientId)
     doc["type"] = "node_list";
     JsonArray arr = doc.createNestedArray("nodes");
 
-    if (g_discoveredNodeCount > 0)
+    if (g_discoveredNodeCount == 0)
+    {
+        // Fallback default node if no LoRa node discovered yet
+        JsonObject o = arr.createNestedObject();
+        o["node_id"] = "Node1";
+    }
+    else
     {
         for (int i = 0; i < g_discoveredNodeCount; i++)
         {
@@ -268,13 +274,13 @@ inline void sendNodeListWS(uint8_t clientId)
 /**
  * @brief Broadcast real received LoRa telemetry data to connected dashboard clients.
  */
-inline void broadcastLoRaTelemetryWS(const String &nodeId, float temp, int tds, float turb, float ph, int rssi)
+inline void broadcastLoRaTelemetryWS(const String &nodeId, const String &timestamp, float temp, int tds, float turb, float ph, int rssi)
 {
     registerNode(nodeId);
 
-    StaticJsonDocument<256> doc;
+    StaticJsonDocument<384> doc;
     doc["node_id"] = nodeId;
-    doc["timestamp"] = isoTimestampNow();
+    doc["timestamp"] = (timestamp.length() > 0 && timestamp != "Unknown") ? timestamp : isoTimestampNow();
     doc["temperature"] = temp;
     doc["turbidity"] = turb;
     doc["tds"] = tds;
@@ -348,7 +354,13 @@ inline bool initSecureWebSocket()
     seedFakeClock();
     randomSeed(esp_random());
     initCipher();
+<<<<<<< HEAD
     WiFi.setSleep(false);
+=======
+
+    // Default slave node pre-registration
+    registerNode("Node1");
+>>>>>>> 26a9c27 (feat(firmware): enhance Master and Slave node firmware with PCF8563 RTC, pH sensor support, dynamic telemetry parsing, and updated OLED display)
 
 #if WIFI_USE_EXTERNAL_NETWORK
     WiFi.mode(WIFI_STA);

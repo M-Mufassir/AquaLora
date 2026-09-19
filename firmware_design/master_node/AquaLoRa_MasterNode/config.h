@@ -33,17 +33,31 @@
 #define LORA_DIO0 13 ///< Digital I/O 0 Pin (GPIO 13)
 
 // --- 2. I2C BUS PINOUT (1.3" / 0.96" OLED DISPLAY) ---
-#define OLED_SDA 21           ///< Hardware I2C Serial Data (GPIO 21)
+#define OLED_SDA 21           ///< Hardware I2C Serial Data (GPIO 21 for D21)
 #define OLED_SCL 22           ///< Hardware I2C Serial Clock (GPIO 22)
 #define OLED_RESET -1         ///< Display Reset Pin (-1 if shared with ESP32)
 #define SCREEN_WIDTH 128      ///< OLED display width in pixels
 #define SCREEN_HEIGHT 64      ///< OLED display height in pixels
 #define OLED_I2C_ADDRESS 0x3C ///< Standard I2C address for OLED (0x3C)
 
+// Set ENABLE_SERIAL_DEBUG to false if SDA is soldered to TX0 (GPIO 1)
+// to prevent Hardware UART Serial from overriding and corrupting the I2C bus!
+#define ENABLE_SERIAL_DEBUG (OLED_SDA != 1)
+
+#if ENABLE_SERIAL_DEBUG
+  #define DEBUG_PRINT(x) Serial.print(x)
+  #define DEBUG_PRINTLN(x) Serial.println(x)
+  #define DEBUG_PRINTF(...) Serial.printf(__VA_ARGS__)
+#else
+  #define DEBUG_PRINT(x)
+  #define DEBUG_PRINTLN(x)
+  #define DEBUG_PRINTF(...)
+#endif
+
 // --- 3. DISPLAY DRIVER CHIP SELECTION ---
-// 1.3-inch OLED displays (DM0056) physically use the SH1106 controller chip.
-// Setting this to true enables SH1106 132x64 page addressing mode with 2-pixel offset.
-#define IS_SH1106_DISPLAY true ///< true for 1.3" SH1106 OLEDs, false for 0.96" SSD1306
+// 1.3-inch OLED displays physically use the SH1106 controller chip (true).
+// 0.96-inch OLED displays physically use the SSD1306 controller chip (false).
+#define IS_SH1106_DISPLAY true  ///< Set to true for 1.3" SH1106 (fixes dalmatian noise screen)
 
 // ============================================================================
 // LORA RF CONFIGURATION (SX1278 / Ra-02 433MHz) - MUST MATCH SLAVE NODE!

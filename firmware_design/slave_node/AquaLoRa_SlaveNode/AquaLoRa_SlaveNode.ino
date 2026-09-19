@@ -1,123 +1,76 @@
 /**
  * @file AquaLoRa_SlaveNode.ino
- * @brief Production Firmware for AquaLoRa Slave Node with PCF8563 RTC Hardware Interrupt Sleep
+ * @brief Production Firmware for AquaLoRa Slave Node with PCF8563 RTC & Dual Timer Deep Sleep
  * @project AquaLoRa Marine Telemetry System - Solar-Powered Marine Telemetry Node
- * @author Senior Embedded Systems Engineer
+ * @author Embedded Systems Expert
+ * 
+ * 7-STEP OPERATIONAL LIFECYCLE:
+ * 1. Wake Up: ESP32 boots from deep sleep (ext0 RTC interrupt on GPIO 27 or internal timer backup).
+ * 2. Sensor Power-Up: GPIO 33 set HIGH to turn ON 5V sensor rail (2N7000 + IRF4905 MOSFET).
+ * 3. Stabilization Delay: Delay 2000ms for 5V boost converter & sensor op-amps to warm up.
+ * 4. Data Acquisition: Sample DS18B20 temp (GPIO 4), TDS (GPIO 34), Turbidity (GPIO 35),
+ *    pH (GPIO 32), and read real-time ISO timestamp from PCF8563 RTC over I2C.
+ * 5. LoRa Transmission: Initialize Ra-02 radio over SPI, pack telemetry payload, transmit RF packet, and sleep radio.
+ * 6. Power Down: GPIO 33 set LOW to completely cut power to 5V sensor rail.
+ * 7. Deep Sleep: Program PCF8563 countdown timer, configure ext0 + safety timer backup, and enter deep sleep.
  */
 
+#include <Arduino.h>
 #include <Wire.h>
 #include "config.h"
 #include "sensors.h"
+#include "rtc_driver.h"
 #include "lora_comms.h"
-
-// PCF8563 I2C Address and Control Registers
-#define PCF8563_I2C_ADDR        0x51
-#define PCF8563_REG_STAT2       0x01
-#define PCF8563_REG_TIMER_CTRL  0x0E
-#define PCF8563_REG_TIMER_VAL   0x0F
-
-/**
- * @brief Configure external PCF8563 RTC countdown timer for next alarm cycle (30 seconds).
- * Clears status register interrupt flags (AF & TF) and enables Timer Interrupt (TIE).
- * When countdown reaches 0, INT pin (connected to ESP32 GPIO 27) pulls LOW.
- * 
- * @return True if PCF8563 responded on I2C and timer hardware interrupt was configured.
- */
-bool setupRTCAlarm() {
-    // Step 1: Start I2C strictly on designated SDA (GPIO 25) & SCL (GPIO 26) pins
-    Wire.begin(I2C_SDA, I2C_SCL);
-    
-    // Step 2: Probe PCF8563 on I2C bus (0x51)
-    Wire.beginTransmission(PCF8563_I2C_ADDR);
-    if (Wire.endTransmission() != 0) {
-        Serial.println(F("[RTC] ERROR: PCF8563 RTC not responding at I2C address 0x51!"));
-        Serial.println(F("[RTC] DIAGNOSTICS: Check CR2032 battery, I2C pull-ups, and SDA(25)/SCL(26) wiring."));
-        return false;
-    }
-    Serial.println(F("[RTC] PCF8563 I2C communication verified OK."));
-
-    // Step 3: Clear PCF8563 status register 2 flags (AF & TF) & set TIE bit (Timer Interrupt Enable)
-    // Register 0x01: Bit 1 (TIE) = 1, Bit 3 (TF) = 0, Bit 4 (AF) = 0 -> 0x02
-    Wire.beginTransmission(PCF8563_I2C_ADDR);
-    Wire.write(PCF8563_REG_STAT2);
-    Wire.write(0x02); 
-    if (Wire.endTransmission() != 0) {
-        Serial.println(F("[RTC] ERROR: Failed to clear flags / write Control_Status_2 register."));
-        return false;
-    }
-
-    // Step 4: Configure Timer Control: Enable Timer (bit 7 = 1), Clock freq 1 Hz (1 tick/sec, bits 0-1 = 10) -> 0x82
-    Wire.beginTransmission(PCF8563_I2C_ADDR);
-    Wire.write(PCF8563_REG_TIMER_CTRL);
-    Wire.write(0x82); 
-    if (Wire.endTransmission() != 0) {
-        Serial.println(F("[RTC] ERROR: Failed to write Timer Control register."));
-        return false;
-    }
-
-    // Step 5: Set Timer Countdown Value (30 seconds)
-    Wire.beginTransmission(PCF8563_I2C_ADDR);
-    Wire.write(PCF8563_REG_TIMER_VAL);
-    Wire.write(SLEEP_DURATION_SEC);
-    if (Wire.endTransmission() != 0) {
-        Serial.println(F("[RTC] ERROR: Failed to write Timer Value register."));
-        return false;
-    }
-
-    // Step 6: Perform readback verification to ensure timer register accepted value
-    Wire.beginTransmission(PCF8563_I2C_ADDR);
-    Wire.write(PCF8563_REG_TIMER_VAL);
-    Wire.endTransmission();
-    Wire.requestFrom(PCF8563_I2C_ADDR, 1);
-    uint8_t readbackVal = Wire.available() ? Wire.read() : 0xFF;
-
-    if (readbackVal == SLEEP_DURATION_SEC) {
-        Serial.printf("[RTC] SUCCESS: PCF8563 timer programmed for %d seconds. Hardware INT armed on GPIO 27.\n", SLEEP_DURATION_SEC);
-        return true;
-    } else {
-        Serial.printf("[RTC] WARNING: PCF8563 timer readback mismatch (expected %d, got %d).\n", SLEEP_DURATION_SEC, readbackVal);
-        return false;
-    }
-}
 
 void setup() {
     // ========================================================================
-    // BOOT PHASE: IMMEDIATE SENSOR POWER ON (GPIO 33 HIGH)
+    // STEP 1: BOOT PHASE & WAKEUP CAUSE DIAGNOSTICS
     // ========================================================================
+    // Immediate pin setup for MOSFET gate to begin powering sensors as early as possible
     pinMode(MOSFET_PIN, OUTPUT);
     digitalWrite(MOSFET_PIN, HIGH); // GPIO 33 HIGH -> 2N7000 ON -> IRF4905 Gate LOW -> 5V ON
-    
+
     // Initialize Serial Debug Console
     Serial.begin(SERIAL_BAUD);
     delay(10);
     Serial.println(F("\n=================================================="));
-    Serial.println(F("    AquaLoRa Slave Node Firmware Starting...     "));
+    Serial.println(F("    AquaLoRa Slave Node Production Firmware       "));
     Serial.println(F("=================================================="));
-    Serial.println(F("[BOOT] GPIO 33 set HIGH -> High-Side MOSFET Switch Powered ON."));
 
-    // Check wakeup cause for diagnostic logging
+    // Check ESP32 deep sleep wakeup reason
     esp_sleep_wakeup_cause_t wakeup_reason = esp_sleep_get_wakeup_cause();
     if (wakeup_reason == ESP_SLEEP_WAKEUP_EXT0) {
         Serial.println(F("[WAKE] Woken up by PCF8563 RTC Hardware Interrupt (GPIO 27 ext0 LOW)."));
     } else if (wakeup_reason == ESP_SLEEP_WAKEUP_TIMER) {
-        Serial.println(F("[WAKE] Woken up by ESP32 Internal Timer (Fallback)."));
+        Serial.println(F("[WAKE] Woken up by ESP32 Internal Safety Timer (Backup)."));
     } else {
         Serial.println(F("[WAKE] Cold Boot / Power-On Reset detected."));
     }
 
-    // Delay 1000ms for 5V rail, boost converter & analog sensors to stabilize
+    // Initialize PCF8563 RTC and IMMEDIATELY clear TF/AF flags so INT (GPIO 27) releases HIGH!
+    bool rtcAvailable = initRTC();
+
+    // ========================================================================
+    // STEP 2 & 3: SENSOR POWER-UP & STABILIZATION DELAY
+    // ========================================================================
+    Serial.println(F("[POWER] GPIO 33 set HIGH -> 5V High-Side MOSFET Powered ON."));
+    Serial.printf("[POWER] Waiting %dms for sensor op-amps, probe RC filters & boost converter to stabilize...\n", STABILIZATION_DELAY_MS);
     delay(STABILIZATION_DELAY_MS);
-    Serial.printf("[BOOT] %dms power stabilization complete.\n", STABILIZATION_DELAY_MS);
+    Serial.println(F("[POWER] Stabilization complete. Ready for sampling."));
 
     // ========================================================================
-    // INITIALIZE SUBSYSTEMS & HARDWARE BUSES
+    // STEP 4: DATA ACQUISITION & RTC TIMESTAMP READING
     // ========================================================================
+    // Initialize sensor ADC resolution/attenuation & OneWire bus
     initSensors();
-    bool loraSuccess = initLoRa();
 
-    // ========================================================================
-    // READ SENSOR DATA
-    // ========================================================================
+    // Read Real-Time Clock date and time over I2C (SDA=25, SCL=26)
+    String timestampStr = "2026-01-01T00:00:00Z";
+    if (rtcAvailable) {
+        readRTCDateTime(timestampStr);
+    }
+
+    // Acquire all 4 water quality sensor readings
     float tempC = 0.0f;
     int tdsPPM = 0;
     float turbidityNTU = 0.0f;
@@ -126,48 +79,53 @@ void setup() {
     readAllSensors(tempC, tdsPPM, turbidityNTU, phVal);
 
     // ========================================================================
-    // FORMAT PAYLOAD AS COMMA-SEPARATED STRING (Node1,Temp,TDS,Turb,pH)
+    // STEP 5: PACK PAYLOAD & LORA TRANSMISSION
     // ========================================================================
-    char payloadBuffer[64];
-    snprintf(payloadBuffer, sizeof(payloadBuffer), "%s,%.2f,%d,%.2f,%.2f", 
-             NODE_ID, tempC, tdsPPM, turbidityNTU, phVal);
-    
+    // Format payload string: "Node1,YYYY-MM-DDTHH:MM:SSZ,Temp,TDS,Turbidity,pH"
+    char payloadBuffer[128];
+    snprintf(payloadBuffer, sizeof(payloadBuffer), "%s,%s,%.2f,%d,%.2f,%.2f",
+             NODE_ID, timestampStr.c_str(), tempC, tdsPPM, turbidityNTU, phVal);
+
     String telemetryPayload = String(payloadBuffer);
     Serial.printf("[TELEMETRY] Formatted Payload: '%s'\n", telemetryPayload.c_str());
 
-    // ========================================================================
-    // TRANSMIT PACKET VIA LORA RA-02
-    // ========================================================================
+    // Initialize Ra-02 LoRa radio over SPI (SCK=19, MISO=18, MOSI=23, NSS=5, RST=16, DIO0=17)
+    bool loraSuccess = initLoRa();
     if (loraSuccess) {
         sendLoRaData(telemetryPayload);
     } else {
-        Serial.println(F("[LORA] Skipping transmission due to Ra-02 initialization failure."));
+        Serial.println(F("[LORA] ERROR: Skipping transmission due to Ra-02 initialization failure."));
     }
 
     // ========================================================================
-    // POWER DOWN PHASE: CUT 5V SENSOR POWER (GPIO 33 LOW) BEFORE SLEEP
+    // STEP 6: POWER DOWN PHASE - CUT 5V SENSOR RAIL POWER
     // ========================================================================
-    digitalWrite(MOSFET_PIN, LOW); // Turn OFF 2N7000 / IRF4905 -> Cut 5V power to sensors
+    digitalWrite(MOSFET_PIN, LOW); // GPIO 33 LOW -> Turn OFF 2N7000 / IRF4905 -> Cut 5V power
     Serial.println(F("[POWER] GPIO 33 set LOW -> 5V Sensor Rail Completely Cut OFF."));
 
     // ========================================================================
-    // TRUE DEEP SLEEP PHASE: PCF8563 HARDWARE INTERRUPT (EXT0 WAKEUP)
+    // STEP 7: DUAL DEEP SLEEP WAKEUP CONFIGURATION (PCF8563 INT + TIMER BACKUP)
     // ========================================================================
-    Serial.println(F("[SLEEP] Configuring PCF8563 hardware interrupt timer..."));
-    bool rtcAvailable = setupRTCAlarm();
+    Serial.println(F("[SLEEP] Programming PCF8563 countdown timer for next cycle..."));
+    bool rtcAlarmSet = false;
 
     if (rtcAvailable) {
-        // Primary Sleep Mode: Hardware interrupt wakeup on GPIO 27 when PCF8563 INT pulls LOW
-        esp_sleep_enable_ext0_wakeup((gpio_num_t)RTC_INT_PIN, 0); // 0 = trigger when GPIO 27 is LOW
-        Serial.println(F("[SLEEP] Hardware Wakeup Armed: ESP32 ext0 enabled on GPIO 27 (Active LOW)."));
-        Serial.printf("[SLEEP] ESP32 entering Deep Sleep via RTC hardware interrupt (%d sec countdown). Goodnight!\n", SLEEP_DURATION_SEC);
-    } else {
-        // Fallback: Use internal ESP32 timer ONLY if PCF8563 RTC failed to initialize
-        Serial.println(F("[SLEEP] CRITICAL WARNING: PCF8563 RTC failed to respond! Using ESP32 internal timer fallback."));
-        esp_sleep_enable_timer_wakeup((uint64_t)SLEEP_DURATION_SEC * 1000000ULL);
-        Serial.printf("[SLEEP] ESP32 entering Deep Sleep via internal timer fallback (%d sec countdown). Goodnight!\n", SLEEP_DURATION_SEC);
+        rtcAlarmSet = setupRTCAlarm(SLEEP_DURATION_SEC);
     }
 
+    if (rtcAlarmSet) {
+        // Trigger 1: PCF8563 RTC Hardware Interrupt (GPIO 27 Active LOW)
+        esp_sleep_enable_ext0_wakeup((gpio_num_t)RTC_INT_PIN, 0); // 0 = trigger when GPIO 27 is LOW
+        Serial.printf("[SLEEP] Primary Wakeup Armed: PCF8563 ext0 enabled on GPIO %d (Active LOW).\n", RTC_INT_PIN);
+    }
+
+    // Trigger 2: ESP32 Internal Timer Safety Backup (32 seconds)
+    // Guarantees ESP32 NEVER gets stuck in deep sleep forever if RTC wire is loose!
+    uint32_t safetyTimerSec = SLEEP_DURATION_SEC + 2;
+    esp_sleep_enable_timer_wakeup((uint64_t)safetyTimerSec * 1000000ULL);
+    Serial.printf("[SLEEP] Safety Backup Wakeup Armed: ESP32 Internal Timer (%d sec).\n", safetyTimerSec);
+
+    Serial.printf("[SLEEP] ESP32 entering Deep Sleep mode (%d sec cycle). Goodnight!\n", SLEEP_DURATION_SEC);
     Serial.println(F("==================================================\n"));
     Serial.flush();
 
@@ -176,5 +134,5 @@ void setup() {
 }
 
 void loop() {
-    // Empty - execution never reaches loop() due to deep sleep entering in setup()
+    // Empty - execution never reaches loop() due to deep sleep entry in setup()
 }
