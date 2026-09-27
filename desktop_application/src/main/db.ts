@@ -116,6 +116,15 @@ export function initDb(): Database.Database {
       last_error TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_alert_outbox_status ON alert_outbox (status, created_at);
+
+    CREATE TABLE IF NOT EXISTS master_nodes (
+      code TEXT PRIMARY KEY,
+      display_name TEXT,
+      ws_url TEXT,
+      key_hex TEXT,
+      last_connected TEXT,
+      created_at TEXT
+    );
   `)
 
   try {
@@ -131,6 +140,18 @@ export function initDb(): Database.Database {
   }
 
   try {
+    db.prepare('ALTER TABLE readings ADD COLUMN master_node_code TEXT').run()
+  } catch {
+    // Column already exists on upgraded databases.
+  }
+
+  try {
+    db.prepare('CREATE INDEX IF NOT EXISTS idx_readings_master ON readings (master_node_code, timestamp)').run()
+  } catch {
+    // Index already exists.
+  }
+
+  try {
     db.prepare('ALTER TABLE nodes ADD COLUMN pond_type TEXT DEFAULT "tilapia"').run()
   } catch {
     // Column already exists on upgraded databases.
@@ -138,6 +159,24 @@ export function initDb(): Database.Database {
 
   try {
     db.prepare('ALTER TABLE nodes ADD COLUMN custom_profile TEXT').run()
+  } catch {
+    // Column already exists on upgraded databases.
+  }
+
+  try {
+    db.prepare('ALTER TABLE nodes ADD COLUMN master_node_code TEXT').run()
+  } catch {
+    // Column already exists on upgraded databases.
+  }
+
+  try {
+    db.prepare('ALTER TABLE alerts ADD COLUMN master_node_code TEXT').run()
+  } catch {
+    // Column already exists on upgraded databases.
+  }
+
+  try {
+    db.prepare('ALTER TABLE outbox ADD COLUMN master_node_code TEXT').run()
   } catch {
     // Column already exists on upgraded databases.
   }
@@ -156,44 +195,129 @@ export function initDb(): Database.Database {
   return db
 }
 
+// ============================================================================
+// MASTER NODE REGISTRY & SCOPING
+// ============================================================================
+let activeMasterNodeCode: string | null = null
+
+export function setActiveMasterNodeCode(code: string | null): void {
+  activeMasterNodeCode = code ? code.trim() : null
+  if (code) {
+    setSetting('active_master_node_code', code.trim())
+  }
+}
+
+export function getActiveMasterNodeCode(): string | null {
+  if (!activeMasterNodeCode) {
+    activeMasterNodeCode = getSettingOptional('active_master_node_code') || getSettingOptional('master_node_code') || null
+  }
+  return activeMasterNodeCode
+}
+
+export interface MasterNodeRecord {
+  code: string
+  display_name: string | null
+  ws_url: string | null
+  key_hex: string | null
+  last_connected: string | null
+  created_at: string | null
+}
+
+export function getMasterNodeByCode(code: string): MasterNodeRecord | null {
+  const row = db.prepare('SELECT * FROM master_nodes WHERE LOWER(code) = LOWER(?)').get(code) as
+    | MasterNodeRecord
+    | undefined
+  return row ?? null
+}
+
+export function getAllMasterNodes(): MasterNodeRecord[] {
+  return db.prepare('SELECT * FROM master_nodes ORDER BY last_connected DESC').all() as MasterNodeRecord[]
+}
+
+export function registerOrUpdateMasterNode(
+  code: string,
+  displayName: string,
+  wsUrl?: string,
+  keyHex?: string
+): { isNew: boolean; record: MasterNodeRecord } {
+  const normalizedCode = code.trim()
+  const existing = getMasterNodeByCode(normalizedCode)
+  const now = new Date().toISOString()
+  if (existing) {
+    db.prepare(`
+      UPDATE master_nodes
+      SET display_name = COALESCE(?, display_name),
+          ws_url = COALESCE(?, ws_url),
+          key_hex = COALESCE(?, key_hex),
+          last_connected = ?
+      WHERE LOWER(code) = LOWER(?)
+    `).run(displayName || null, wsUrl || null, keyHex || null, now, normalizedCode)
+    setActiveMasterNodeCode(normalizedCode)
+    return { isNew: false, record: getMasterNodeByCode(normalizedCode)! }
+  } else {
+    db.prepare(`
+      INSERT INTO master_nodes (code, display_name, ws_url, key_hex, last_connected, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(normalizedCode, displayName || normalizedCode, wsUrl || null, keyHex || null, now, now)
+    setActiveMasterNodeCode(normalizedCode)
+    return { isNew: true, record: getMasterNodeByCode(normalizedCode)! }
+  }
+}
+
 /**
- * Wipe all node-specific telemetry data (readings, nodes, alerts, sync outbox)
- * so the desktop can onboard a brand-new Master Node cleanly.
+ * Wipe node-specific telemetry data (readings, nodes, alerts, sync outbox).
+ * If a masterNodeCode is provided, wipes ONLY that Master Node's local data.
  * Settings, users, and threshold profiles are preserved.
  */
-export function resetLocalNodeData(): { nodes: number; readings: number; alerts: number; outbox: number } {
+export function resetLocalNodeData(masterNodeCode?: string): { nodes: number; readings: number; alerts: number; outbox: number } {
+  const code = masterNodeCode ?? getActiveMasterNodeCode()
   const tx = db.transaction(() => {
-    const nodes = (db.prepare('DELETE FROM nodes').run()).changes
-    const readings = (db.prepare('DELETE FROM readings').run()).changes
-    const alerts = (db.prepare('DELETE FROM alerts').run()).changes
-    const outboxReadings = (db.prepare('DELETE FROM outbox').run()).changes
-    const outboxAlerts = (db.prepare('DELETE FROM alert_outbox').run()).changes
-    return { nodes, readings, alerts, outbox: outboxReadings + outboxAlerts }
+    let nodes = 0, readings = 0, alerts = 0, outbox = 0
+    if (code) {
+      nodes = (db.prepare('DELETE FROM nodes WHERE master_node_code = ?').run(code)).changes
+      readings = (db.prepare('DELETE FROM readings WHERE master_node_code = ?').run(code)).changes
+      alerts = (db.prepare('DELETE FROM alerts WHERE master_node_code = ?').run(code)).changes
+      outbox = (db.prepare('DELETE FROM outbox WHERE master_node_code = ?').run(code)).changes
+    } else {
+      nodes = (db.prepare('DELETE FROM nodes').run()).changes
+      readings = (db.prepare('DELETE FROM readings').run()).changes
+      alerts = (db.prepare('DELETE FROM alerts').run()).changes
+      outbox = (db.prepare('DELETE FROM outbox').run()).changes
+    }
+    return { nodes, readings, alerts, outbox }
   })
   const result = tx()
-  console.log('[db] resetLocalNodeData:', result)
+  console.log('[db] resetLocalNodeData for code:', code, result)
   return result
 }
 
-export function upsertNodeFromReading(reading: Reading): NodeRow {
+export function upsertNodeFromReading(reading: Reading, masterNodeCode?: string): NodeRow {
+  const code = masterNodeCode ?? (reading as any).master_node_code ?? getActiveMasterNodeCode()
   db.prepare(
-    `INSERT INTO nodes (id, last_seen, battery_pct, lora_rssi, status)
-     VALUES (@node_id, @timestamp, @battery_pct, @rssi, 'online')
+    `INSERT INTO nodes (id, last_seen, battery_pct, lora_rssi, status, master_node_code)
+     VALUES (@node_id, @timestamp, @battery_pct, @rssi, 'online', ?)
      ON CONFLICT(id) DO UPDATE SET
        last_seen = excluded.last_seen,
        battery_pct = excluded.battery_pct,
        lora_rssi = excluded.lora_rssi,
-       status = 'online'`
-  ).run(reading)
-  return db.prepare('SELECT * FROM nodes WHERE id = ?').get(reading.node_id) as NodeRow
+       status = 'online',
+       master_node_code = COALESCE(nodes.master_node_code, excluded.master_node_code)`
+  ).run(reading, code)
+  return normalizeNodeRow(db.prepare('SELECT * FROM nodes WHERE id = ?').get(reading.node_id))
 }
 
-export function insertReading(reading: Reading): number {
-  // Ensure pond_type is defined; default to 'tilapia' for legacy readings
-  const enrichedReading = { ...reading, pond_type: (reading as any).pond_type ?? 'tilapia' } as any;
+export function insertReading(reading: Reading, masterNodeCode?: string): number {
+  const code = masterNodeCode ?? (reading as any).master_node_code ?? getActiveMasterNodeCode()
+  // Ensure pond_type and master_node_code are populated
+  const enrichedReading = {
+    ...reading,
+    pond_type: (reading as any).pond_type ?? 'tilapia',
+    master_node_code: code
+  } as any
+
   const result = db.prepare(
-    `INSERT INTO readings (node_id, timestamp, temperature, turbidity, tds, ph, pond_type)
-     VALUES (@node_id, @timestamp, @temperature, @turbidity, @tds, @ph, @pond_type)`
+    `INSERT INTO readings (node_id, timestamp, temperature, turbidity, tds, ph, pond_type, master_node_code)
+     VALUES (@node_id, @timestamp, @temperature, @turbidity, @tds, @ph, @pond_type, @master_node_code)`
   ).run(enrichedReading)
 
   const readingId = Number(result.lastInsertRowid ?? 0)
@@ -328,27 +452,41 @@ export function markAlertOutboxFailed(id: number, errorMessage: string): void {
   setSetting('cloud_sync_last_error', errorMessage)
 }
 
-export function getRecentReadings(nodeId: string, limit = 50): StoredReading[] {
+export function getRecentReadings(nodeId: string, limit = 50, masterNodeCode?: string): StoredReading[] {
+  const code = masterNodeCode ?? getActiveMasterNodeCode()
+  if (code) {
+    return db
+      .prepare(`SELECT * FROM readings WHERE node_id = ? AND (master_node_code = ? OR master_node_code IS NULL) ORDER BY timestamp DESC LIMIT ?`)
+      .all(nodeId, code, limit) as StoredReading[]
+  }
   return db
     .prepare(`SELECT * FROM readings WHERE node_id = ? ORDER BY timestamp DESC LIMIT ?`)
     .all(nodeId, limit) as StoredReading[]
 }
 
 /**
- * Returns the latest stored reading for every distinct node in SQLite.
+ * Returns the latest stored reading for every distinct node in SQLite for the active Master Node.
  * Used on startup to populate node cards immediately.
  */
-export function getLatestReadingsForAllNodes(): Record<string, StoredReading> {
-  const rows = db
-    .prepare(
-      `SELECT r.* FROM readings r
+export function getLatestReadingsForAllNodes(masterNodeCode?: string): Record<string, StoredReading> {
+  const code = masterNodeCode ?? getActiveMasterNodeCode()
+  const query = code
+    ? `SELECT r.* FROM readings r
+       INNER JOIN (
+         SELECT node_id, MAX(timestamp) as max_time
+         FROM readings
+         WHERE master_node_code = ? OR master_node_code IS NULL
+         GROUP BY node_id
+       ) latest ON r.node_id = latest.node_id AND r.timestamp = latest.max_time
+       WHERE r.master_node_code = ? OR r.master_node_code IS NULL`
+    : `SELECT r.* FROM readings r
        INNER JOIN (
          SELECT node_id, MAX(timestamp) as max_time
          FROM readings
          GROUP BY node_id
        ) latest ON r.node_id = latest.node_id AND r.timestamp = latest.max_time`
-    )
-    .all() as StoredReading[]
+
+  const rows = (code ? db.prepare(query).all(code, code) : db.prepare(query).all()) as StoredReading[]
 
   const map: Record<string, StoredReading> = {}
   for (const row of rows) {
@@ -361,11 +499,12 @@ export function getLatestReadingsForAllNodes(): Record<string, StoredReading> {
  * Inserts historical readings in batch while ignoring records that already exist
  * (matching node_id and timestamp) without creating duplicate outbox queues.
  */
-export function batchInsertHistoricalReadings(readings: Reading[]): number {
+export function batchInsertHistoricalReadings(readings: Reading[], masterNodeCode?: string): number {
   if (readings.length === 0) return 0
+  const code = masterNodeCode ?? getActiveMasterNodeCode()
   const insertStmt = db.prepare(
-    `INSERT INTO readings (node_id, timestamp, temperature, turbidity, tds, ph, pond_type)
-     SELECT @node_id, @timestamp, @temperature, @turbidity, @tds, @ph, @pond_type
+    `INSERT INTO readings (node_id, timestamp, temperature, turbidity, tds, ph, pond_type, master_node_code)
+     SELECT @node_id, @timestamp, @temperature, @turbidity, @tds, @ph, @pond_type, @master_node_code
      WHERE NOT EXISTS (
        SELECT 1 FROM readings WHERE node_id = @node_id AND timestamp = @timestamp
      )`
@@ -381,12 +520,13 @@ export function batchInsertHistoricalReadings(readings: Reading[]): number {
         turbidity: r.turbidity,
         tds: r.tds,
         ph: r.ph,
-        pond_type: (r as any).pond_type ?? 'tilapia'
+        pond_type: (r as any).pond_type ?? 'tilapia',
+        master_node_code: (r as any).master_node_code ?? code
       }
       const res = insertStmt.run(enriched)
       if (res.changes > 0) {
         count++
-        upsertNodeStub(r.node_id)
+        upsertNodeStub(r.node_id, code ?? undefined)
       }
     }
     return count
@@ -398,8 +538,20 @@ export function batchInsertHistoricalReadings(readings: Reading[]): number {
 export function getReadingsInRange(
   nodeId: string,
   startIso: string,
-  endIso: string
+  endIso: string,
+  masterNodeCode?: string
 ): StoredReading[] {
+  const code = masterNodeCode ?? getActiveMasterNodeCode()
+  if (code) {
+    return db
+      .prepare(
+        `SELECT * FROM readings
+         WHERE node_id = ? AND (master_node_code = ? OR master_node_code IS NULL) AND timestamp >= ? AND timestamp <= ?
+         ORDER BY timestamp ASC
+         LIMIT 5000`
+      )
+      .all(nodeId, code, startIso, endIso) as StoredReading[]
+  }
   return db
     .prepare(
       `SELECT * FROM readings
@@ -424,13 +576,15 @@ export function insertAlert(alert: {
   parameter: string
   severity: string
   message: string
+  master_node_code?: string
 }): Alert {
+  const code = alert.master_node_code ?? getActiveMasterNodeCode()
   const result = db
     .prepare(
-      `INSERT INTO alerts (node_id, timestamp, parameter, severity, message)
-       VALUES (@node_id, @timestamp, @parameter, @severity, @message)`
+      `INSERT INTO alerts (node_id, timestamp, parameter, severity, message, master_node_code)
+       VALUES (@node_id, @timestamp, @parameter, @severity, @message, @master_node_code)`
     )
-    .run(alert)
+    .run({ ...alert, master_node_code: code })
   
   const alertId = Number(result.lastInsertRowid ?? 0)
   const insertedAlert = db.prepare('SELECT * FROM alerts WHERE id = ?').get(alertId) as Alert
@@ -443,13 +597,23 @@ export function insertAlert(alert: {
   return insertedAlert
 }
 
-export function getRecentAlerts(nodeId: string, limit = 50): Alert[] {
+export function getRecentAlerts(nodeId: string, limit = 50, masterNodeCode?: string): Alert[] {
+  const code = masterNodeCode ?? getActiveMasterNodeCode()
+  if (code) {
+    return db
+      .prepare(`SELECT * FROM alerts WHERE node_id = ? AND (master_node_code = ? OR master_node_code IS NULL) ORDER BY timestamp DESC LIMIT ?`)
+      .all(nodeId, code, limit) as Alert[]
+  }
   return db
     .prepare(`SELECT * FROM alerts WHERE node_id = ? ORDER BY timestamp DESC LIMIT ?`)
     .all(nodeId, limit) as Alert[]
 }
 
-export function getAllRecentAlerts(limit = 200): Alert[] {
+export function getAllRecentAlerts(limit = 200, masterNodeCode?: string): Alert[] {
+  const code = masterNodeCode ?? getActiveMasterNodeCode()
+  if (code) {
+    return db.prepare(`SELECT * FROM alerts WHERE (master_node_code = ? OR master_node_code IS NULL) ORDER BY timestamp DESC LIMIT ?`).all(code, limit) as Alert[]
+  }
   return db.prepare(`SELECT * FROM alerts ORDER BY timestamp DESC LIMIT ?`).all(limit) as Alert[]
 }
 
@@ -518,7 +682,17 @@ export function changePassword(username: string, newPassword: string): void {
   db.prepare('UPDATE users SET password_hash = ? WHERE username = ?').run(passwordHash, username)
 }
 
-export function getAllNodes(): NodeRow[] {
+export function getAllNodes(masterNodeCode?: string): NodeRow[] {
+  const code = masterNodeCode ?? getActiveMasterNodeCode()
+  if (code) {
+    return (
+      db
+        .prepare(
+          'SELECT * FROM nodes WHERE master_node_code = ? OR master_node_code IS NULL ORDER BY id'
+        )
+        .all(code) as any[]
+    ).map(normalizeNodeRow)
+  }
   return (db.prepare('SELECT * FROM nodes ORDER BY id').all() as any[]).map(normalizeNodeRow)
 }
 
@@ -602,21 +776,28 @@ export function setNodeCustomProfile(
 // Creates a node row from a discovery message if it doesn't exist yet;
 // leaves an existing row's name/location untouched. Discovery re-fires on
 // every WiFi reconnect, so this must not clobber a name the user later set.
-export function upsertNodeStub(id: string): NodeRow {
+export function upsertNodeStub(id: string, masterNodeCode?: string): NodeRow {
+  const code = masterNodeCode ?? getActiveMasterNodeCode()
   db.prepare(
-    `INSERT INTO nodes (id, status) VALUES (?, 'unknown')
-     ON CONFLICT(id) DO NOTHING`
-  ).run(id)
-  return db.prepare('SELECT * FROM nodes WHERE id = ?').get(id) as NodeRow
+    `INSERT INTO nodes (id, status, master_node_code) VALUES (?, 'unknown', ?)
+     ON CONFLICT(id) DO UPDATE SET master_node_code = COALESCE(nodes.master_node_code, excluded.master_node_code)`
+  ).run(id, code)
+  return normalizeNodeRow(db.prepare('SELECT * FROM nodes WHERE id = ?').get(id))
 }
 
-export function upsertNode(id: string, name: string | null, location: string | null): NodeRow {
+export function upsertNode(
+  id: string,
+  name: string | null,
+  location: string | null,
+  masterNodeCode?: string
+): NodeRow {
+  const code = masterNodeCode ?? getActiveMasterNodeCode()
   db.prepare(
-    `INSERT INTO nodes (id, name, location, status)
-     VALUES (?, ?, ?, 'unknown')
-     ON CONFLICT(id) DO UPDATE SET name = excluded.name, location = excluded.location`
-  ).run(id, name, location)
-  return db.prepare('SELECT * FROM nodes WHERE id = ?').get(id) as NodeRow
+    `INSERT INTO nodes (id, name, location, status, master_node_code)
+     VALUES (?, ?, ?, 'unknown', ?)
+     ON CONFLICT(id) DO UPDATE SET name = excluded.name, location = excluded.location, master_node_code = COALESCE(excluded.master_node_code, nodes.master_node_code)`
+  ).run(id, name, location, code)
+  return normalizeNodeRow(db.prepare('SELECT * FROM nodes WHERE id = ?').get(id))
 }
 
 export function getSetting(key: string, fallback: string): string {

@@ -69,6 +69,7 @@ export interface Reading {
   custom_profile?: PondThresholdProfile | null
   battery_pct: number
   rssi: number
+  master_node_code?: string | null
 }
 
 export interface SetIntervalCommand {
@@ -145,6 +146,7 @@ export interface NodeRow {
   status: 'unknown' | 'online' | 'offline'
   pond_type: PondType | null
   custom_profile: PondThresholdProfile | null
+  master_node_code?: string | null
 }
 
 export interface UserRow {
@@ -185,6 +187,8 @@ export interface CloudSyncStatus {
   lastSyncedAt: string | null
   lastError: string | null
   url: string | null
+  isSyncing?: boolean
+  isOnline?: boolean
 }
 
 export type NodeStatusTier = 'Good' | 'Warning' | 'Critical' | 'Offline'

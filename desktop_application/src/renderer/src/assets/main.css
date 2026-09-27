@@ -560,69 +560,148 @@ code {
   flex: 1;
 }
 
-.nav-connection-warning {
-  color: var(--status-warning);
-  font-size: 12px;
-  font-weight: 600;
-  margin-right: 12px;
-  background-color: color-mix(in srgb, var(--status-warning) 15%, transparent);
-  padding: 4px 10px;
-  border-radius: 999px;
-}
-
-.nav-connection-good {
-  color: var(--status-good);
-  font-size: 12px;
-  font-weight: 600;
-  margin-right: 12px;
-  background-color: color-mix(in srgb, var(--status-good) 15%, transparent);
-  padding: 4px 10px;
-  border-radius: 999px;
-}
-
-.nav-sync-group {
-  display: flex;
+/* Refactored Desktop Top Bar Status Pills */
+.nav-status-pill {
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
-  margin-right: 12px;
-}
-
-.nav-sync-badge {
-  font-size: 12px;
+  gap: 7px;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 9999px;
+  font-size: 11.5px;
   font-weight: 600;
-  padding: 4px 10px;
-  border-radius: 999px;
+  letter-spacing: 0.2px;
+  border: 1px solid transparent;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  background: var(--ev-c-bg-soft);
+  color: var(--ev-c-text-1);
+  user-select: none;
+  white-space: nowrap;
 }
 
-.nav-sync-badge.synced {
-  color: var(--status-good);
-  background-color: color-mix(in srgb, var(--status-good) 15%, transparent);
-}
-
-.nav-sync-badge.pending {
-  color: var(--status-warning);
-  background-color: color-mix(in srgb, var(--status-warning) 15%, transparent);
-}
-
-.nav-sync-badge.error {
-  color: var(--status-critical);
-  background-color: color-mix(in srgb, var(--status-critical) 15%, transparent);
-}
-
-.nav-sync-btn {
+button.nav-status-pill {
   cursor: pointer;
-  border: none;
-  border-radius: 8px;
-  padding: 5px 12px;
-  font-size: 12px;
-  font-weight: 700;
-  color: #ffffff;
-  background: linear-gradient(135deg, rgba(74, 168, 255, 0.4), rgba(56, 211, 159, 0.3));
-  transition: all 0.2s ease;
+  outline: none;
 }
 
-.nav-sync-btn:hover {
-  background: linear-gradient(135deg, rgba(74, 168, 255, 0.6), rgba(56, 211, 159, 0.5));
+button.nav-status-pill:hover:not(:disabled) {
+  filter: brightness(1.15);
+  transform: translateY(-1px);
+}
+
+button.nav-status-pill:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.pill-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+/* Master Node Connected */
+.nav-status-pill.connected {
+  background: rgba(16, 185, 129, 0.12);
+  border-color: rgba(16, 185, 129, 0.35);
+  color: #10b981;
+}
+
+.pill-dot.live {
+  background: #10b981;
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.8);
+}
+
+/* Master Node Reconnecting */
+.nav-status-pill.reconnecting {
+  background: rgba(245, 158, 11, 0.12);
+  border-color: rgba(245, 158, 11, 0.35);
+  color: #f59e0b;
+}
+
+.pill-dot.reconnecting {
+  background: #f59e0b;
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.8);
+  animation: pillPulse 1.4s ease-in-out infinite;
+}
+
+/* Cloud Synced */
+.nav-status-pill.synced {
+  background: rgba(14, 165, 233, 0.12);
+  border-color: rgba(14, 165, 233, 0.32);
+  color: #38bdf8;
+}
+
+.pill-dot.synced {
+  background: #38bdf8;
+  box-shadow: 0 0 7px rgba(56, 189, 248, 0.7);
+}
+
+/* Cloud Syncing (Animated) */
+.nav-status-pill.syncing {
+  background: rgba(99, 102, 241, 0.15);
+  border-color: rgba(99, 102, 241, 0.45);
+  color: #818cf8;
+}
+
+.pill-spin-icon {
+  display: inline-block;
+  font-size: 13px;
+  line-height: 1;
+  animation: pillRotate 1s linear infinite;
+}
+
+/* Cloud Pending */
+.nav-status-pill.pending {
+  background: rgba(245, 158, 11, 0.12);
+  border-color: rgba(245, 158, 11, 0.35);
+  color: #fbbf24;
+}
+
+.pill-dot.pending {
+  background: #fbbf24;
+}
+
+/* Cloud Offline */
+.nav-status-pill.offline {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.35);
+  color: #f87171;
+}
+
+.pill-dot.offline {
+  background: #ef4444;
+}
+
+.nav-status-pill.local-only {
+  background: rgba(148, 163, 184, 0.12);
+  border-color: rgba(148, 163, 184, 0.25);
+  color: #94a3b8;
+}
+
+.pill-dot.local {
+  background: #94a3b8;
+}
+
+@keyframes pillPulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.35;
+    transform: scale(0.8);
+  }
+}
+
+@keyframes pillRotate {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
 }
 
 .cloud-migration-card {

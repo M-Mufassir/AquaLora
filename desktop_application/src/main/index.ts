@@ -46,7 +46,11 @@ import {
   markOutboxFailed,
   markAlertOutboxSynced,
   markAlertOutboxFailed,
-  resetLocalNodeData
+  resetLocalNodeData,
+  setActiveMasterNodeCode,
+  getActiveMasterNodeCode,
+  getMasterNodeByCode,
+  registerOrUpdateMasterNode
 } from './db'
 import {
   saveCloudSession,
@@ -86,13 +90,18 @@ async function fetchPastTelemetryFromCloud(nodeCode: string, token: string, clou
       for (const cloudNode of cloudNodes) {
         const id = cloudNode.node_id ?? cloudNode.id
         if (!id) continue
-        const localNode = upsertNodeStub(String(id))
+        const localNode = upsertNodeStub(String(id), nodeCode)
         if (cloudNode.name || cloudNode.display_name || cloudNode.location) {
-          upsertNode(String(id), cloudNode.name ?? cloudNode.display_name ?? localNode.name ?? String(id), cloudNode.location ?? localNode.location ?? '')
+          upsertNode(
+            String(id),
+            cloudNode.name ?? cloudNode.display_name ?? localNode.name ?? String(id),
+            cloudNode.location ?? localNode.location ?? '',
+            nodeCode
+          )
         }
         if (cloudNode.pond_type) setNodePondType(String(id), cloudNode.pond_type)
         if (cloudNode.custom_profile) setNodeCustomProfile(String(id), cloudNode.custom_profile)
-        mainWindow?.webContents.send('node:updated', getAllNodes().find((n) => n.id === String(id)) ?? localNode)
+        mainWindow?.webContents.send('node:updated', getAllNodes(nodeCode).find((n) => n.id === String(id)) ?? localNode)
       }
     }
     if (historyResponse.ok) {
@@ -101,7 +110,7 @@ async function fetchPastTelemetryFromCloud(nodeCode: string, token: string, clou
       const readings = rows.map((row: any) => ({ ...row, node_id: row.node_id ?? row.nodeId, timestamp: row.timestamp ?? row.created_at }))
         .filter((row: any) => row.node_id && row.timestamp && row.temperature != null)
         .filter((row: any) => !row.master_node_code || row.master_node_code === nodeCode)
-      batchInsertHistoricalReadings(readings)
+      batchInsertHistoricalReadings(readings, nodeCode)
       for (const reading of readings) mainWindow?.webContents.send('reading:new', reading)
     }
   } catch (error: any) {
@@ -146,7 +155,7 @@ async function syncQueuedReadings(isManual = false): Promise<void> {
   
   if (pendingEntries.length === 0 && pendingAlerts.length === 0) {
     const status = getCloudSyncStatus()
-    mainWindow?.webContents.send('cloud:sync-status', status)
+    mainWindow?.webContents.send('cloud:sync-status', { ...status, isSyncing: false, isOnline: true })
     return
   }
 
@@ -156,16 +165,20 @@ async function syncQueuedReadings(isManual = false): Promise<void> {
     if (!hasInternet) {
       console.debug('[main] Skipping automatic cloud sync: no internet connectivity')
       const status = getCloudSyncStatus()
-      mainWindow?.webContents.send('cloud:sync-status', status)
+      mainWindow?.webContents.send('cloud:sync-status', { ...status, isSyncing: false, isOnline: false })
       return
     }
   }
 
   const accessToken = await getCloudAuthToken()
   if (!accessToken) {
+    const status = getCloudSyncStatus()
+    mainWindow?.webContents.send('cloud:sync-status', { ...status, isSyncing: false, isOnline: false })
     throw new Error('Not authenticated to cloud backend. Please activate Master Node cloud session.')
   }
 
+  // Notify renderer that background sync is in progress (triggers animation)
+  mainWindow?.webContents.send('cloud:sync-status', { ...getCloudSyncStatus(), isSyncing: true, isOnline: true })
 
   try {
     // Sync readings
@@ -210,7 +223,7 @@ async function syncQueuedReadings(isManual = false): Promise<void> {
       markAlertOutboxSynced(pendingAlerts.map((entry) => entry.id))
     }
 
-    mainWindow?.webContents.send('cloud:sync-status', getCloudSyncStatus())
+    mainWindow?.webContents.send('cloud:sync-status', { ...getCloudSyncStatus(), isSyncing: false, isOnline: true })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown cloud sync error'
     for (const entry of pendingEntries) {
@@ -219,7 +232,7 @@ async function syncQueuedReadings(isManual = false): Promise<void> {
     for (const entry of pendingAlerts) {
       markAlertOutboxFailed(entry.id, message)
     }
-    mainWindow?.webContents.send('cloud:sync-status', getCloudSyncStatus())
+    mainWindow?.webContents.send('cloud:sync-status', { ...getCloudSyncStatus(), isSyncing: false, isOnline: false })
   }
 }
 
@@ -324,9 +337,18 @@ app.whenReady().then(() => {
         getSettingOptional('cloud_sync_url')?.trim() ||
         'https://aqualora.up.railway.app/api'
 
-      // 1. Detect if this is a new (different) Master Node — if so, reset local telemetry data
-      const previousNodeCode = getSettingOptional('master_node_code')
-      const isNewNode = !!previousNodeCode && previousNodeCode !== nodeCode
+      // 1. Check if this Master Node was previously connected in our local SQLite database
+      const existingMasterNode = getMasterNodeByCode(nodeCode)
+      const isNewNode = !existingMasterNode
+      setActiveMasterNodeCode(nodeCode)
+
+      // Register or update master node record in SQLite database
+      registerOrUpdateMasterNode(
+        nodeCode,
+        displayName,
+        wsUrl,
+        password ? deriveKeyFromPassword(password).toString('hex') : undefined
+      )
 
       // 2. Save settings
       setSetting('master_node_code', nodeCode)
@@ -852,9 +874,10 @@ app.whenReady().then(() => {
 
   masterNodeClient.onNodeList((nodes) => {
     console.log('[main] node list received:', nodes)
+    const activeCode = getActiveMasterNodeCode() ?? getSettingOptional('master_node_code') ?? undefined
     for (const { node_id } of nodes) {
       try {
-        const node = upsertNodeStub(node_id)
+        const node = upsertNodeStub(node_id, activeCode)
         mainWindow?.webContents.send('node:updated', node)
       } catch (err) {
         console.error('[main] failed to persist discovered node:', err)
@@ -863,16 +886,27 @@ app.whenReady().then(() => {
     mainWindow?.webContents.send('nodes:discovered', nodes)
   })
 
+  let cloudSyncDebounceTimer: NodeJS.Timeout | null = null
+
   masterNodeClient.onReading((reading) => {
     console.log('[main] reading received:', reading)
+    const activeCode = getActiveMasterNodeCode() ?? getSettingOptional('master_node_code') ?? undefined
     try {
-      const node = upsertNodeFromReading(reading)
-      insertReading(reading)
+      const node = upsertNodeFromReading(reading, activeCode)
+      insertReading(reading, activeCode)
       mainWindow?.webContents.send('node:updated', node)
     } catch (err) {
       console.error('[main] failed to persist reading:', err)
     }
     mainWindow?.webContents.send('reading:new', reading)
+
+    // Debounced automatic background sync to cloud
+    if (cloudSyncDebounceTimer) clearTimeout(cloudSyncDebounceTimer)
+    cloudSyncDebounceTimer = setTimeout(() => {
+      void syncQueuedReadings(false).catch((err) => {
+        console.debug('[main] Background sync on reading skipped:', err instanceof Error ? err.message : String(err))
+      })
+    }, 4000)
 
     decisionEngine.scoreReading(reading).then((result) => {
       if (!result) return
@@ -894,7 +928,8 @@ app.whenReady().then(() => {
             timestamp: reading.timestamp,
             parameter: result.parameter,
             severity: result.status,
-            message: result.recommendation ?? `${result.status}: Fish Health Index ${result.score}`
+            message: result.recommendation ?? `${result.status}: Fish Health Index ${result.score}`,
+            master_node_code: activeCode
           })
           mainWindow?.webContents.send('alert:new', alert)
         } catch (err) {
@@ -903,11 +938,38 @@ app.whenReady().then(() => {
       }
     })
   })
+
   // Start background UDP discovery immediately so local ESP32 Master Nodes are detected on boot
   startUdpDiscovery((device) => {
     console.log(`[udpDiscovery] Discovered Master Node: ${device.id} at ${device.ip}:${device.port}`)
     mainWindow?.webContents.send('discovery:device-found', device)
+
+    // Autonomous Auto-Reconnect on Master Node restart or IP re-assignment
+    const activeCode = getActiveMasterNodeCode() ?? getSettingOptional('master_node_code')
+    const beaconWsUrl = `ws://${device.ip}:${device.port}`
+    const isMatchingNode =
+      (activeCode && (device.id.toUpperCase() === activeCode.toUpperCase() || device.id === 'AquaLoRa-Master')) ||
+      (!activeCode && device.id === 'AquaLoRa-Master')
+
+    if (isMatchingNode) {
+      const currentUrl = masterNodeClient.getCurrentUrl()
+      if (!masterNodeClient.isConnected() || currentUrl !== beaconWsUrl) {
+        console.log(`[main] Master node presence detected at ${beaconWsUrl} (active: ${activeCode}). Auto-reconnecting...`)
+        setSetting('master_node_url', beaconWsUrl)
+        const pairedKeyHex = getSettingOptional('master_node_key_hex')
+        const useKey =
+          pairedKeyHex && !(beaconWsUrl.includes('localhost') || beaconWsUrl.includes('127.0.0.1'))
+            ? Buffer.from(pairedKeyHex, 'hex')
+            : undefined
+        masterNodeClient.updateEndpoint(beaconWsUrl, useKey)
+      }
+    }
   })
+
+  const savedMasterNodeCode = getSettingOptional('master_node_code')
+  if (savedMasterNodeCode) {
+    setActiveMasterNodeCode(savedMasterNodeCode)
+  }
 
   // Only auto-connect if the user has actually paired with a Master Node
   // before (via the Connect Device wizard) — otherwise a fresh install, or

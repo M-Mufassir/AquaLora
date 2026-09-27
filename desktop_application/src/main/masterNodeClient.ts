@@ -15,11 +15,29 @@ export class MasterNodeClient {
   private socket: WebSocket | null = null
   private reconnectTimer: NodeJS.Timeout | null = null
   private encryptionKey: Buffer | null = null
+  private currentUrl: string | null = null
   private onReadingCallback: ((reading: Reading) => void) | null = null
   private onNodeListCallback: ((nodes: NodeListMessage['nodes']) => void) | null = null
   private onStatusChangeCallback: ((status: ConnectionStatus) => void) | null = null
 
+  isConnected(): boolean {
+    return this.socket !== null && this.socket.readyState === WebSocket.OPEN
+  }
+
+  getCurrentUrl(): string | null {
+    return this.currentUrl
+  }
+
+  updateEndpoint(url: string, encryptionKey?: Buffer): void {
+    if (this.currentUrl === url && this.isConnected()) {
+      return
+    }
+    console.log(`[masterNodeClient] updating endpoint to ${url}`)
+    this.connect(url, encryptionKey ?? (this.encryptionKey ?? undefined))
+  }
+
   connect(url: string = DEFAULT_ESP32_URL, encryptionKey?: Buffer): void {
+    this.currentUrl = url
     // Tear down any existing connection first — connect() can be called again
     // when the user re-pairs to a different Master Node via the Connect Device wizard.
     if (this.reconnectTimer) {
