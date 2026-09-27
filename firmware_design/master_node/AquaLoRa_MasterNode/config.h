@@ -40,24 +40,10 @@
 #define SCREEN_HEIGHT 64      ///< OLED display height in pixels
 #define OLED_I2C_ADDRESS 0x3C ///< Standard I2C address for OLED (0x3C)
 
-// Set ENABLE_SERIAL_DEBUG to false if SDA is soldered to TX0 (GPIO 1)
-// to prevent Hardware UART Serial from overriding and corrupting the I2C bus!
-#define ENABLE_SERIAL_DEBUG (OLED_SDA != 1)
-
-#if ENABLE_SERIAL_DEBUG
-  #define DEBUG_PRINT(x) Serial.print(x)
-  #define DEBUG_PRINTLN(x) Serial.println(x)
-  #define DEBUG_PRINTF(...) Serial.printf(__VA_ARGS__)
-#else
-  #define DEBUG_PRINT(x)
-  #define DEBUG_PRINTLN(x)
-  #define DEBUG_PRINTF(...)
-#endif
-
 // --- 3. DISPLAY DRIVER CHIP SELECTION ---
-// 1.3-inch OLED displays physically use the SH1106 controller chip (true).
+// TRONIC.LK DM0056 1.3" OLED displays physically use the SH1106 controller chip (true).
 // 0.96-inch OLED displays physically use the SSD1306 controller chip (false).
-#define IS_SH1106_DISPLAY true  ///< Set to true for 1.3" SH1106 (fixes dalmatian noise screen)
+#define IS_SH1106_DISPLAY true ///< Set to true for 1.3" SH1106 (fixes dalmatian noise screen)
 
 // ============================================================================
 // LORA RF CONFIGURATION (SX1278 / Ra-02 433MHz) - MUST MATCH SLAVE NODE!
@@ -69,23 +55,17 @@
 #define LORA_SYNC_WORD 0xF3     ///< Network Sync Word to isolate packets
 
 // ============================================================================
-// WIFI MODE & WEBSOCKET DASHBOARD CONFIGURATION
+// WIFI HOTSPOT & WEBSOCKET GATEWAY CONFIGURATION
 // ============================================================================
-// Set WIFI_USE_EXTERNAL_NETWORK to 1 when the Master Node should join a
-// local WiFi router instead of starting its own AP. In that mode the
-// dashboard connects directly to the ESP32's assigned IP on the LAN, e.g.
-// ws://192.168.1.50:8081. When set to 0, the ESP32 starts its own AP and
-// behaves like the original pairing flow.
-#define WIFI_USE_EXTERNAL_NETWORK 0
-#define EXTERNAL_WIFI_SSID "YourRouterSSID"
-#define EXTERNAL_WIFI_PASSWORD "YourRouterPassword"
-
-#define WIFI_AP_SSID "AquaLoRa-MasterNode" ///< Wi-Fi AP SSID for Dashboard Pairing
-#define WIFI_AP_PASSWORD "aqualora123"     ///< Wi-Fi Password & AES-256 Key Seed
-#define WEBSOCKET_PORT 8081                ///< WebSocket Server Port (ws://192.168.4.1:8081)
+#define WIFI_SSID "Aqualora "              ///< Mobile hotspot / Router SSID (Note: phone hotspot has trailing space)
+#define WIFI_SSID_ALT "Aqualora"           ///< Fallback without space
+#define WIFI_PASSWORD "Aqualora"           ///< Mobile hotspot / Router Password
+#define MASTER_PASSWORD "aqualora123"      ///< Gateway pairing password & AES-256 Key Seed
+#define WEBSOCKET_PORT 8081                ///< WebSocket Server Port (ws://<ip>:8081)
 #define UDP_DISCOVERY_PORT 8082            ///< Desktop discovery beacon port
-#define MASTER_NODE_ID "master-node"       ///< Stable gateway identity
-#define MASTER_NODE_CODE "AQL-001"         ///< Provisioned gateway code
-#define DISCOVERY_INTERVAL_MS 3000         ///< UDP presence beacon interval
+#define MDNS_HOSTNAME "aqualora"           ///< mDNS hostname (resolvable at aqualora.local)
+#define MASTER_NODE_ID "master-node"       ///< Gateway identity
+#define MASTER_NODE_CODE "AQL-001"         ///< Gateway code
+#define DISCOVERY_INTERVAL_MS 1000         ///< UDP presence beacon interval (1.0s for instant desktop detection)
 
 #endif // CONFIG_H

@@ -17,6 +17,7 @@
 #include <mbedtls/gcm.h>
 #include <mbedtls/base64.h>
 #include <mbedtls/md.h>
+#include <ESPmDNS.h>
 #include "config.h"
 
 // Maximum tracked slave nodes in registry
@@ -73,13 +74,13 @@ inline void registerNode(const String &nodeId)
 }
 
 /**
- * @brief Initialize AES-256-GCM cipher with SHA-256 key derived from AP_PASSWORD.
+ * @brief Initialize AES-256-GCM cipher with SHA-256 key derived from MASTER_PASSWORD.
  */
 inline void initCipher()
 {
     uint8_t key[32];
     const mbedtls_md_info_t *mdInfo = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
-    mbedtls_md(mdInfo, (const unsigned char *)WIFI_AP_PASSWORD, strlen(WIFI_AP_PASSWORD), key);
+    mbedtls_md(mdInfo, (const unsigned char *)MASTER_PASSWORD, strlen(MASTER_PASSWORD), key);
     mbedtls_gcm_init(&g_gcmCtx);
     mbedtls_gcm_setkey(&g_gcmCtx, MBEDTLS_CIPHER_ID_AES, key, 256);
     Serial.println(F("[CRYPTO] AES-256-GCM initialized with SHA-256 derived key."));
@@ -346,66 +347,136 @@ inline void webSocketEvent(uint8_t num, WStype_t type, uint8_t *payload, size_t 
 }
 
 /**
- * @brief Initialize Wi-Fi Access Point and AES-256-GCM WebSocket Server.
+ * @brief Transmit UDP presence discovery beacon to let desktop dashboard locate this Master Node.
+ */
+inline void sendDiscoveryBeacon()
+{
+    StaticJsonDocument<256> beacon;
+    beacon["service"] = "aqualora-master";
+    beacon["id"] = MASTER_NODE_ID;
+    beacon["code"] = MASTER_NODE_CODE;
+    beacon["ip"] = WiFi.localIP().toString();
+    beacon["port"] = WEBSOCKET_PORT;
+    beacon["mode"] = "STA";
+    String payload;
+    serializeJson(beacon, payload);
+
+    // 1. Send to standard global broadcast address
+    IPAddress globalBroadcast(255, 255, 255, 255);
+    g_discoveryUdp.beginPacket(globalBroadcast, UDP_DISCOVERY_PORT);
+    g_discoveryUdp.write((const uint8_t *)payload.c_str(), payload.length());
+    g_discoveryUdp.endPacket();
+
+    // 2. Send to subnet directed broadcast address
+    if (WiFi.status() == WL_CONNECTED) {
+        uint32_t ip = (uint32_t)WiFi.localIP();
+        uint32_t mask = (uint32_t)WiFi.subnetMask();
+        IPAddress subnetBroadcast = IPAddress(ip | ~mask);
+        g_discoveryUdp.beginPacket(subnetBroadcast, UDP_DISCOVERY_PORT);
+        g_discoveryUdp.write((const uint8_t *)payload.c_str(), payload.length());
+        g_discoveryUdp.endPacket();
+    }
+}
+
+/**
+ * @brief Initialize Pure Station Wi-Fi connection, mDNS, and AES-256-GCM WebSocket Server.
  */
 inline bool initSecureWebSocket()
 {
-    Serial.println(F("[WIFI] Starting Master Node network connection..."));
+    Serial.println(F("\n[WIFI] Initializing Master Node Wi-Fi Station connection..."));
     seedFakeClock();
     randomSeed(esp_random());
     initCipher();
-<<<<<<< HEAD
-    WiFi.setSleep(false);
-=======
-
+    
     // Default slave node pre-registration
     registerNode("Node1");
->>>>>>> 26a9c27 (feat(firmware): enhance Master and Slave node firmware with PCF8563 RTC, pH sensor support, dynamic telemetry parsing, and updated OLED display)
 
-#if WIFI_USE_EXTERNAL_NETWORK
+    // Clean previous stale Wi-Fi state & disable power-save sleep
+    WiFi.persistent(false);
+    WiFi.disconnect(true, true);
+    delay(200);
+
     WiFi.mode(WIFI_STA);
-    WiFi.begin(EXTERNAL_WIFI_SSID, EXTERNAL_WIFI_PASSWORD);
-    Serial.printf("[WIFI] Connecting to external network '%s'...\n", EXTERNAL_WIFI_SSID);
+    WiFi.setSleep(false);
+    WiFi.setAutoReconnect(true);
+
+    // 1. Scan available networks to detect the exact SSID of the phone hotspot / router
+    Serial.println(F("[WIFI] Scanning nearby Wi-Fi networks..."));
+    int n = WiFi.scanNetworks(false, true);
+    String targetSsid = WIFI_SSID;
+
+    if (n > 0) {
+        Serial.printf("[WIFI] Found %d Wi-Fi networks in range:\n", n);
+        for (int i = 0; i < n; i++) {
+            String scannedSsid = WiFi.SSID(i);
+            int rssi = WiFi.RSSI(i);
+            Serial.printf("       [%d] '%s' (RSSI: %d dBm)\n", i + 1, scannedSsid.c_str(), rssi);
+
+            // Match if SSID contains Aqualora (case-insensitive or whitespace-trimmed)
+            String trimmed = scannedSsid;
+            trimmed.trim();
+            if (trimmed.equalsIgnoreCase("Aqualora") || scannedSsid == WIFI_SSID || scannedSsid == WIFI_SSID_ALT) {
+                targetSsid = scannedSsid; // Lock on to exact broadcast SSID string!
+                Serial.printf("[WIFI] >>> MATCHED Hotspot SSID: '%s' (Length: %d chars) <<<\n", 
+                              targetSsid.c_str(), targetSsid.length());
+            }
+        }
+    } else {
+        Serial.println(F("[WIFI] Scan returned no networks, proceeding with default configured SSID."));
+    }
+    WiFi.scanDelete();
+
+    // 2. Connect to the target SSID
+    Serial.printf("[WIFI] Connecting to '%s' (Password: '%s')...\n", targetSsid.c_str(), WIFI_PASSWORD);
+    WiFi.begin(targetSsid.c_str(), WIFI_PASSWORD);
 
     unsigned long startMs = millis();
-    while (WiFi.status() != WL_CONNECTED && millis() - startMs < 20000UL)
+    while (WiFi.status() != WL_CONNECTED && millis() - startMs < 15000UL)
     {
-        delay(250);
+        delay(400);
+        Serial.print(F("."));
     }
+    Serial.println();
 
-    if (WiFi.status() != WL_CONNECTED)
+    if (WiFi.status() == WL_CONNECTED)
     {
-        Serial.println(F("[WIFI] External WiFi join failed. Falling back to AP mode."));
-        WiFi.mode(WIFI_AP);
-        bool apStarted = WiFi.softAP(WIFI_AP_SSID, WIFI_AP_PASSWORD);
-        if (!apStarted)
-        {
-            Serial.println(F("[WIFI] ERROR: Failed to start Wi-Fi AP fallback!"));
-            return false;
-        }
-        Serial.printf("[WIFI] Access Point Started! SSID: '%s'\n", WIFI_AP_SSID);
-        Serial.printf("[WIFI] Master Node AP Gateway IP: %s\n", WiFi.softAPIP().toString().c_str());
+        Serial.println(F("[WIFI] =============================================="));
+        Serial.println(F("[WIFI] SUCCESS: Master Node connected to Wi-Fi!"));
+        Serial.printf("[WIFI] Connected SSID : '%s'\n", WiFi.SSID().c_str());
+        Serial.printf("[WIFI] IP Address     : %s\n", WiFi.localIP().toString().c_str());
+        Serial.printf("[WIFI] Subnet Mask    : %s\n", WiFi.subnetMask().toString().c_str());
+        Serial.printf("[WIFI] Gateway IP     : %s\n", WiFi.gatewayIP().toString().c_str());
+        Serial.printf("[WIFI] Signal Strength: %d dBm\n", WiFi.RSSI());
+        Serial.println(F("[WIFI] =============================================="));
     }
     else
     {
-        Serial.printf("[WIFI] Connected to external WiFi. Local IP: %s\n", WiFi.localIP().toString().c_str());
+        Serial.printf("[WIFI] ⚠️ WARNING: Connection to '%s' timed out (Status code: %d).\n", 
+                      targetSsid.c_str(), (int)WiFi.status());
+        Serial.println(F("[WIFI] HINTS:"));
+        Serial.println(F("       1. Ensure your phone hotspot is set to 2.4 GHz (Turn ON 'Maximize Compatibility')."));
+        Serial.println(F("       2. Check hotspot password matches 'Aqualora'."));
+        Serial.println(F("       3. Background auto-reconnect will continue retrying..."));
     }
-#else
-    WiFi.mode(WIFI_AP);
-    bool apStarted = WiFi.softAP(WIFI_AP_SSID, WIFI_AP_PASSWORD);
-    if (!apStarted)
+
+    // Start mDNS Responder (e.g., ws://aqualora.local:8081)
+    if (MDNS.begin(MDNS_HOSTNAME))
     {
-        Serial.println(F("[WIFI] ERROR: Failed to start Wi-Fi AP!"));
-        return false;
+        MDNS.addService("aqualora", "tcp", WEBSOCKET_PORT);
+        Serial.printf("[MDNS] Responder active at http://%s.local\n", MDNS_HOSTNAME);
     }
 
-    Serial.printf("[WIFI] Access Point Started! SSID: '%s'\n", WIFI_AP_SSID);
-    Serial.printf("[WIFI] Master Node AP Gateway IP: %s\n", WiFi.softAPIP().toString().c_str());
-#endif
-
+    // Start UDP Presence Discovery Beacon
     g_discoveryUdp.begin(UDP_DISCOVERY_PORT);
-    Serial.printf("[DISCOVERY] UDP presence beacons enabled on port %u\n", UDP_DISCOVERY_PORT);
+    Serial.printf("[DISCOVERY] UDP presence beacon enabled on port %u\n", UDP_DISCOVERY_PORT);
 
+    // Send immediate beacon if connected
+    if (WiFi.status() == WL_CONNECTED)
+    {
+        sendDiscoveryBeacon();
+    }
+
+    // Start WebSocket Server
     g_webSocket.begin();
     g_webSocket.onEvent(webSocketEvent);
     Serial.printf("[WS] WebSocket Server listening on port %u (AES-256-GCM Encrypted)\n", WEBSOCKET_PORT);
@@ -422,19 +493,7 @@ inline void processWebSocket()
     if (now - g_lastDiscoveryMs >= DISCOVERY_INTERVAL_MS)
     {
         g_lastDiscoveryMs = now;
-        StaticJsonDocument<256> beacon;
-        beacon["service"] = "aqualora-master";
-        beacon["id"] = MASTER_NODE_ID;
-        beacon["code"] = MASTER_NODE_CODE;
-        beacon["ip"] = (WiFi.getMode() & WIFI_STA) ? WiFi.localIP().toString() : WiFi.softAPIP().toString();
-        beacon["port"] = WEBSOCKET_PORT;
-        beacon["mode"] = (WiFi.getMode() & WIFI_STA) ? "STA" : "AP";
-        String payload;
-        serializeJson(beacon, payload);
-        IPAddress broadcast = (WiFi.getMode() & WIFI_STA) ? IPAddress(255, 255, 255, 255) : IPAddress(192, 168, 4, 255);
-        g_discoveryUdp.beginPacket(broadcast, UDP_DISCOVERY_PORT);
-        g_discoveryUdp.write((const uint8_t *)payload.c_str(), payload.length());
-        g_discoveryUdp.endPacket();
+        sendDiscoveryBeacon();
     }
 }
 

@@ -22,16 +22,19 @@ function ConnectDevicePage({ onComplete, isOnboarding = false }: ConnectDevicePa
   const [wifiPassword, setWifiPassword] = useState<string>('')
   const [isConnectingWifi, setIsConnectingWifi] = useState(false)
   const [wifiError, setWifiError] = useState<string | null>(null)
+  const [showSwitchWifi, setShowSwitchWifi] = useState(false)
 
   // Step 2: Auto-derived Node & Sign-In state
   const [discoveredDevices, setDiscoveredDevices] = useState<DiscoveredMasterNode[]>([])
-  const [selectedDevice, setSelectedDevice] = useState<DiscoveredMasterNode | null>(null)
+  const [selectedDeviceKey, setSelectedDeviceKey] = useState<string>('')
   const [nodeCode, setNodeCode] = useState('master-node')
   const [displayName, setDisplayName] = useState('AquaLoRa Master Node')
   const [nodeWsUrl, setNodeWsUrl] = useState('ws://10.41.47.240:8081')
   const [pairingPassword, setPairingPassword] = useState('aqualora123')
+  const [showPassword, setShowPassword] = useState(false)
   const [cloudUrl, setCloudUrl] = useState('')
   const [showAdvanced, setShowAdvanced] = useState(false)
+  const [isManualMode, setIsManualMode] = useState(false)
 
   const [isConnectingDevice, setIsConnectingDevice] = useState(false)
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
@@ -91,23 +94,45 @@ function ConnectDevicePage({ onComplete, isOnboarding = false }: ConnectDevicePa
         return [...prev, device]
       })
 
-      // Auto-select first discovered device and auto-derive form fields
-      setSelectedDevice((prev) => {
-        if (!prev) {
+      // Auto-select first discovered device if none explicitly picked
+      setSelectedDeviceKey((prevKey) => {
+        if (!prevKey || prevKey === '__manual__') {
           setNodeCode(device.id)
           setNodeWsUrl(`ws://${device.ip}:${device.port || 8081}`)
-          // Check if this is a different node from what was previously paired
+          setIsManualMode(false)
           setPreviousNodeCode((prevCode) => {
             if (prevCode && prevCode !== device.id) {
               setIsNewNodeWarning(true)
             }
             return prevCode
           })
-          return device
+          return device.ip
         }
-        return prev
+        return prevKey
       })
     })
+  }
+
+  function handleDeviceSelectChange(e: React.ChangeEvent<HTMLSelectElement>): void {
+    const key = e.target.value
+    setSelectedDeviceKey(key)
+
+    if (key === '__manual__') {
+      setIsManualMode(true)
+      return
+    }
+
+    setIsManualMode(false)
+    const dev = discoveredDevices.find((d) => d.ip === key)
+    if (dev) {
+      setNodeCode(dev.id)
+      setNodeWsUrl(`ws://${dev.ip}:${dev.port || 8081}`)
+      if (previousNodeCode && previousNodeCode !== dev.id) {
+        setIsNewNodeWarning(true)
+      } else {
+        setIsNewNodeWarning(false)
+      }
+    }
   }
 
   async function checkWifiStatus(): Promise<void> {
@@ -153,21 +178,20 @@ function ConnectDevicePage({ onComplete, isOnboarding = false }: ConnectDevicePa
   }
 
   function handleSelectDiscoveredDevice(device: DiscoveredMasterNode): void {
-    setSelectedDevice(device)
+    setSelectedDeviceKey(device.ip)
     setNodeCode(device.id)
     setNodeWsUrl(`ws://${device.ip}:${device.port || 8081}`)
+    setIsManualMode(false)
     setStep('login')
   }
 
   function handleProceedToLogin(): void {
-    if (selectedDevice) {
-      setNodeCode(selectedDevice.id)
-      setNodeWsUrl(`ws://${selectedDevice.ip}:${selectedDevice.port || 8081}`)
-    } else if (discoveredDevices.length > 0) {
+    if (!selectedDeviceKey && discoveredDevices.length > 0) {
       const dev = discoveredDevices[0]
-      setSelectedDevice(dev)
+      setSelectedDeviceKey(dev.ip)
       setNodeCode(dev.id)
       setNodeWsUrl(`ws://${dev.ip}:${dev.port || 8081}`)
+      setIsManualMode(false)
     }
     setStep('login')
   }
@@ -241,7 +265,7 @@ function ConnectDevicePage({ onComplete, isOnboarding = false }: ConnectDevicePa
     }
   }
 
-  const isAutoDerived = selectedDevice?.id === nodeCode || discoveredDevices.some((d) => d.id === nodeCode)
+  const activeDiscoveredNode = discoveredDevices.find((d) => d.ip === selectedDeviceKey)
 
   return (
     <div className={`page connect-page ${isOnboarding ? 'onboarding-mode' : ''}`} style={isOnboarding ? { margin: '40px auto', maxWidth: '620px' } : {}}>
@@ -274,7 +298,7 @@ function ConnectDevicePage({ onComplete, isOnboarding = false }: ConnectDevicePa
       <p className="page-subtitle" style={{ marginBottom: '20px' }}>
         {step === 'wifi'
           ? 'Step 1: Connect your computer to the same Wi-Fi network or hotspot as your ESP32.'
-          : 'Step 2: Sign in with your ESP32 Master Node to link live telemetry and register with the cloud.'}
+          : 'Step 2: Select your Master Node and enter its password to connect.'}
       </p>
 
       {/* Stepper Header */}
@@ -294,7 +318,7 @@ function ConnectDevicePage({ onComplete, isOnboarding = false }: ConnectDevicePa
           type="button"
         >
           <div className="wizard-step-circle">2</div>
-          <span className="wizard-step-label">2. ESP32 Sign-In</span>
+          <span className="wizard-step-label">2. Master Node Pairing</span>
         </button>
       </div>
 
@@ -306,52 +330,96 @@ function ConnectDevicePage({ onComplete, isOnboarding = false }: ConnectDevicePa
             Ensure this computer and the ESP32 Master Node are on the same Wi-Fi router or mobile hotspot.
           </p>
 
-          {/* Current Connection Status */}
+          {/* Current Connection Status Card */}
           {currentSsid ? (
             <div
               style={{
-                padding: '14px 18px',
-                borderRadius: '8px',
-                backgroundColor: 'rgba(12, 163, 12, 0.12)',
-                border: '1px solid rgba(12, 163, 12, 0.3)',
+                padding: '18px 20px',
+                borderRadius: '10px',
+                background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.12), rgba(6, 78, 59, 0.25))',
+                border: '1px solid rgba(16, 185, 129, 0.4)',
+                margin: '16px 0 20px',
                 display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                margin: '14px 0 16px'
+                flexDirection: 'column',
+                gap: '14px'
               }}
             >
-              <div>
-                <span style={{ color: 'var(--status-good)', fontWeight: 600, fontSize: '14px' }}>
-                  🟢 Connected to: {currentSsid}
-                </span>
-                <p style={{ margin: '4px 0 0', fontSize: '12px', color: 'var(--ev-c-text-2)' }}>
-                  Local network connection active. Ready to discover ESP32 Master Nodes.
-                </p>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '18px' }}>📶</span>
+                    <span style={{ color: 'var(--status-good)', fontWeight: 700, fontSize: '16px' }}>
+                      Connected to: {currentSsid}
+                    </span>
+                    <span
+                      style={{
+                        fontSize: '11px',
+                        padding: '2px 8px',
+                        borderRadius: '12px',
+                        backgroundColor: 'rgba(16, 185, 129, 0.2)',
+                        color: 'var(--status-good)',
+                        fontWeight: 600
+                      }}
+                    >
+                      Active System Wi-Fi
+                    </span>
+                  </div>
+                  <p style={{ margin: '6px 0 0', fontSize: '12px', color: 'var(--ev-c-text-2)', lineHeight: 1.4 }}>
+                    Derived automatically from your Windows connection. Your ESP32 Master Node and laptop communicate across this network.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="apply-btn"
+                  onClick={() => checkWifiStatus()}
+                  style={{ fontSize: '12px', padding: '6px 12px' }}
+                >
+                  🔄 Refresh Status
+                </button>
               </div>
-              <button className="apply-btn" onClick={() => checkWifiStatus()}>
-                Refresh
-              </button>
+
+              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  className="login-submit-btn"
+                  onClick={handleProceedToLogin}
+                  style={{ margin: 0, padding: '10px 22px', fontSize: '13px', flex: 1, minWidth: '220px' }}
+                >
+                  Proceed with Current Network →
+                </button>
+                <button
+                  type="button"
+                  className="apply-btn"
+                  onClick={() => setShowSwitchWifi(!showSwitchWifi)}
+                  style={{ fontSize: '13px', padding: '10px 16px' }}
+                >
+                  {showSwitchWifi ? '▲ Hide Wi-Fi Switcher' : '⚙️ Switch Wi-Fi Network'}
+                </button>
+              </div>
             </div>
           ) : (
             <div
               style={{
-                padding: '14px 18px',
-                borderRadius: '8px',
+                padding: '16px 20px',
+                borderRadius: '10px',
                 backgroundColor: 'rgba(250, 178, 25, 0.12)',
-                border: '1px solid rgba(250, 178, 25, 0.3)',
-                margin: '14px 0 16px'
+                border: '1px solid rgba(250, 178, 25, 0.35)',
+                margin: '16px 0 20px'
               }}
             >
-              <span style={{ color: 'var(--status-warning)', fontWeight: 600, fontSize: '14px' }}>
-                🟡 Not Connected to Wi-Fi
-              </span>
-              <p style={{ margin: '4px 0 0', fontSize: '12px', color: 'var(--ev-c-text-2)' }}>
-                Please join your shared hotspot or router before proceeding.
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '18px' }}>🟡</span>
+                <span style={{ color: 'var(--status-warning)', fontWeight: 600, fontSize: '15px' }}>
+                  Not Connected to Wi-Fi
+                </span>
+              </div>
+              <p style={{ margin: '6px 0 0', fontSize: '12px', color: 'var(--ev-c-text-2)' }}>
+                Please join your mobile phone hotspot or Wi-Fi router below so this app can discover the Master Node.
               </p>
             </div>
           )}
 
-          {/* Live UDP Discovery Card */}
+          {/* Live UDP Discovery Card in Step 1 */}
           {discoveredDevices.length > 0 && (
             <div
               style={{
@@ -367,10 +435,10 @@ function ConnectDevicePage({ onComplete, isOnboarding = false }: ConnectDevicePa
             >
               <div>
                 <strong style={{ color: '#4aa8ff', fontSize: '14px' }}>
-                  ⚡ Master Node Detected: {discoveredDevices[0].id}
+                  ⚡ {discoveredDevices.length} Master Node{discoveredDevices.length > 1 ? 's' : ''} Detected
                 </strong>
                 <p style={{ margin: '4px 0 0', fontSize: '12px', color: 'var(--ev-c-text-2)' }}>
-                  Broadcasting beacon at <strong>{discoveredDevices[0].ip}:{discoveredDevices[0].port || 8081}</strong>.
+                  Found <strong>{discoveredDevices[0].id}</strong> at <code>{discoveredDevices[0].ip}:{discoveredDevices[0].port || 8081}</code>.
                 </p>
               </div>
               <button
@@ -378,79 +446,96 @@ function ConnectDevicePage({ onComplete, isOnboarding = false }: ConnectDevicePa
                 onClick={() => handleSelectDiscoveredDevice(discoveredDevices[0])}
                 style={{ margin: 0, padding: '8px 16px', fontSize: '13px' }}
               >
-                Sign In with Node →
+                Proceed to Pair →
               </button>
             </div>
           )}
 
-          <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
-            <button
-              className="apply-btn"
-              onClick={scanWifiNetworks}
-              disabled={isScanningWifi}
+          {/* Switch Wi-Fi Network / System Settings Section */}
+          {(!currentSsid || showSwitchWifi) && (
+            <div
+              style={{
+                marginTop: '16px',
+                padding: '18px',
+                borderRadius: '8px',
+                backgroundColor: 'var(--color-background-soft)',
+                border: '1px solid var(--color-border)'
+              }}
             >
-              {isScanningWifi ? 'Scanning Networks…' : '🔄 Scan Wi-Fi Networks'}
-            </button>
-            <button
-              className="apply-btn"
-              onClick={() => window.api.openWifiSettings()}
-            >
-              Open Windows Settings
-            </button>
-          </div>
-
-          {wifiError && <p style={{ color: 'var(--status-critical)', fontSize: '13px' }}>{wifiError}</p>}
-
-          {/* Wi-Fi Networks List */}
-          {wifiNetworks.length > 0 && (
-            <div style={{ marginTop: '12px', marginBottom: '16px' }}>
-              <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--ev-c-text-1)' }}>
-                Available Wi-Fi Networks:
-              </label>
-              <ul className="wifi-list" style={{ marginTop: '8px' }}>
-                {wifiNetworks.map((net) => {
-                  const isSelected = selectedSsid === net.ssid
-                  return (
-                    <li
-                      key={net.ssid}
-                      className={`wifi-item ${isSelected ? 'selected' : ''}`}
-                      onClick={() => setSelectedSsid(net.ssid)}
-                    >
-                      <span className="wifi-ssid">
-                        📶 <strong>{net.ssid}</strong> {net.ssid === currentSsid && '(Active)'}
-                      </span>
-                      <span style={{ fontSize: '12px', color: 'var(--ev-c-text-2)' }}>
-                        {net.security || 'WPA2'}
-                      </span>
-                    </li>
-                  )
-                })}
-              </ul>
-
-              {selectedSsid && selectedSsid !== currentSsid && (
-                <div style={{ marginTop: '14px', display: 'flex', gap: '8px', alignItems: 'center' }}>
-                  <input
-                    type="password"
-                    placeholder={`Password for ${selectedSsid}`}
-                    value={wifiPassword}
-                    onChange={(e) => setWifiPassword(e.target.value)}
-                    style={{
-                      flex: 1,
-                      padding: '10px 14px',
-                      borderRadius: '6px',
-                      border: '1px solid var(--color-border)',
-                      backgroundColor: 'var(--color-background)',
-                      color: 'var(--ev-c-text-1)'
-                    }}
-                  />
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                <strong style={{ fontSize: '13px', color: 'var(--ev-c-text-1)' }}>
+                  ⚙️ Wi-Fi Network Settings (Switch Connection)
+                </strong>
+                <div style={{ display: 'flex', gap: '8px' }}>
                   <button
-                    className="login-submit-btn"
-                    onClick={handleConnectWifi}
-                    disabled={isConnectingWifi}
-                    style={{ margin: 0, whiteSpace: 'nowrap' }}
+                    className="apply-btn"
+                    onClick={scanWifiNetworks}
+                    disabled={isScanningWifi}
+                    style={{ fontSize: '12px', padding: '4px 10px' }}
                   >
-                    {isConnectingWifi ? 'Connecting…' : 'Connect Wi-Fi'}
+                    {isScanningWifi ? 'Scanning…' : '🔄 Scan Networks'}
                   </button>
+                  <button
+                    className="apply-btn"
+                    onClick={() => window.api.openWifiSettings()}
+                    style={{ fontSize: '12px', padding: '4px 10px' }}
+                  >
+                    Windows Wi-Fi Settings
+                  </button>
+                </div>
+              </div>
+
+              {wifiError && <p style={{ color: 'var(--status-critical)', fontSize: '13px', marginBottom: '10px' }}>{wifiError}</p>}
+
+              {/* Wi-Fi Networks List */}
+              {wifiNetworks.length > 0 && (
+                <div style={{ marginTop: '8px' }}>
+                  <ul className="wifi-list" style={{ marginTop: '8px' }}>
+                    {wifiNetworks.map((net) => {
+                      const isSelected = selectedSsid === net.ssid
+                      return (
+                        <li
+                          key={net.ssid}
+                          className={`wifi-item ${isSelected ? 'selected' : ''}`}
+                          onClick={() => setSelectedSsid(net.ssid)}
+                        >
+                          <span className="wifi-ssid">
+                            📶 <strong>{net.ssid}</strong> {net.ssid === currentSsid && '(Current Active)'}
+                          </span>
+                          <span style={{ fontSize: '12px', color: 'var(--ev-c-text-2)' }}>
+                            {net.security || 'WPA2'}
+                          </span>
+                        </li>
+                      )
+                    })}
+                  </ul>
+
+                  {selectedSsid && selectedSsid !== currentSsid && (
+                    <div style={{ marginTop: '14px', display: 'flex', gap: '8px', alignItems: 'center' }}>
+                      <input
+                        type="password"
+                        placeholder={`Password for ${selectedSsid}`}
+                        value={wifiPassword}
+                        onChange={(e) => setWifiPassword(e.target.value)}
+                        style={{
+                          flex: 1,
+                          padding: '10px 14px',
+                          borderRadius: '6px',
+                          border: '1px solid var(--color-border)',
+                          backgroundColor: 'var(--color-background)',
+                          color: 'var(--ev-c-text-1)'
+                        }}
+                      />
+                      <button
+                        className="login-submit-btn"
+                        onClick={handleConnectWifi}
+                        disabled={isConnectingWifi}
+                        style={{ margin: 0, whiteSpace: 'nowrap' }}
+                      >
+                        {isConnectingWifi ? 'Connecting…' : 'Connect Wi-Fi'}
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -467,41 +552,19 @@ function ConnectDevicePage({ onComplete, isOnboarding = false }: ConnectDevicePa
               onClick={handleProceedToLogin}
               style={{ margin: 0, marginLeft: 'auto' }}
             >
-              Continue to ESP32 Sign-In →
+              Continue to Master Node Selection →
             </button>
           </div>
         </section>
       )}
 
-      {/* STEP 2: AUTO-DERIVED SIGN-IN */}
+      {/* STEP 2: MASTER NODE DROPDOWN & PASSWORD PAIRING */}
       {step === 'login' && (
         <section className="settings-section">
-          <h2>Step 2: ESP32 Master Node Sign-In</h2>
+          <h2>Step 2: Master Node Selection &amp; Sign-In</h2>
           <p className="status">
-            Sign in with your ESP32 Master Node. Telemetry encryption will be configured and your node will be registered with the cloud backend.
+            Choose the detected ESP32 Master Node from the list and enter its pairing password.
           </p>
-
-          {isAutoDerived && (
-            <div
-              style={{
-                padding: '10px 14px',
-                borderRadius: '6px',
-                backgroundColor: 'rgba(59, 130, 246, 0.12)',
-                border: '1px solid rgba(59, 130, 246, 0.3)',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                margin: '12px 0 8px',
-                fontSize: '13px',
-                color: '#4aa8ff'
-              }}
-            >
-              <span>⚡</span>
-              <span>
-                Node identity automatically derived from local ESP32 broadcast: <strong>{nodeCode}</strong>
-              </span>
-            </div>
-          )}
 
           {/* New-node database reset warning */}
           {isNewNodeWarning && previousNodeCode && previousNodeCode !== nodeCode && (
@@ -511,20 +574,16 @@ function ConnectDevicePage({ onComplete, isOnboarding = false }: ConnectDevicePa
                 borderRadius: '8px',
                 backgroundColor: 'rgba(245, 158, 11, 0.15)',
                 border: '1px solid rgba(245, 158, 11, 0.45)',
-                margin: '0 0 16px',
+                margin: '14px 0',
                 fontSize: '13px'
               }}
             >
               <strong style={{ color: '#f59e0b', display: 'block', marginBottom: '4px' }}>
-                ⚠️ New Master Node Detected
+                ⚠️ Switching Master Node Target
               </strong>
-              <p style={{ margin: '0 0 8px', color: 'var(--ev-c-text-1)', lineHeight: 1.5 }}>
-                Previously paired with <code>{previousNodeCode}</code>. Signing in as{' '}
-                <code>{nodeCode}</code> will <strong>reset all local telemetry data</strong>{' '}
-                (readings, nodes, alerts) so this station starts fresh with the new node.
-              </p>
-              <p style={{ margin: 0, color: 'var(--ev-c-text-2)', fontSize: '12px' }}>
-                Cloud-synced data is preserved. Confirm by clicking "Sign In &amp; Launch Dashboard".
+              <p style={{ margin: '0 0 6px', color: 'var(--ev-c-text-1)', lineHeight: 1.5 }}>
+                Previously paired with <code>{previousNodeCode}</code>. Connecting to{' '}
+                <code>{nodeCode}</code> will reset local telemetry so this workstation starts clean with the new gateway.
               </p>
             </div>
           )}
@@ -533,56 +592,35 @@ function ConnectDevicePage({ onComplete, isOnboarding = false }: ConnectDevicePa
             style={{
               display: 'flex',
               flexDirection: 'column',
-              gap: '14px',
-              padding: '18px',
+              gap: '16px',
+              padding: '20px',
               borderRadius: '8px',
               backgroundColor: 'var(--color-background-soft)',
               border: '1px solid var(--color-border)',
               margin: '16px 0'
             }}
           >
-            {/* Master Node Code / Username */}
+            {/* 1. MASTER NODE DROPDOWN SELECTOR */}
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
                 <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--ev-c-text-1)' }}>
-                  Master Node Username / Code:
+                  Select Master Node:
                 </label>
-                {isAutoDerived && (
-                  <span style={{ fontSize: '11px', color: '#4aa8ff', fontWeight: 600 }}>
-                    ✓ Auto-derived
-                  </span>
-                )}
+                <button
+                  type="button"
+                  className="apply-btn"
+                  onClick={() => {
+                    window.api.startDiscovery().catch(() => {})
+                  }}
+                  style={{ fontSize: '11px', padding: '3px 8px' }}
+                >
+                  🔄 Scan Again
+                </button>
               </div>
-              <input
-                type="text"
-                value={nodeCode}
-                onChange={(e) => setNodeCode(e.target.value)}
-                placeholder="master-node"
-                style={{
-                  width: '100%',
-                  padding: '10px 14px',
-                  borderRadius: '6px',
-                  border: '1px solid var(--color-border)',
-                  backgroundColor: 'var(--color-background)',
-                  color: 'var(--ev-c-text-1)',
-                  fontSize: '14px'
-                }}
-              />
-              <span style={{ fontSize: '11px', color: 'var(--ev-c-text-3)', display: 'block', marginTop: '4px' }}>
-                Identifier broadcasted by the ESP32 (e.g., <code>master-node</code>).
-              </span>
-            </div>
 
-            {/* Master Node WebSocket URL */}
-            <div>
-              <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '6px', color: 'var(--ev-c-text-1)' }}>
-                ESP32 WebSocket Address:
-              </label>
-              <input
-                type="text"
-                value={nodeWsUrl}
-                onChange={(e) => setNodeWsUrl(e.target.value)}
-                placeholder="ws://10.41.47.240:8081"
+              <select
+                value={isManualMode ? '__manual__' : selectedDeviceKey}
+                onChange={handleDeviceSelectChange}
                 style={{
                   width: '100%',
                   padding: '10px 14px',
@@ -591,93 +629,242 @@ function ConnectDevicePage({ onComplete, isOnboarding = false }: ConnectDevicePa
                   backgroundColor: 'var(--color-background)',
                   color: 'var(--ev-c-text-1)',
                   fontSize: '14px',
-                  fontFamily: 'monospace'
+                  cursor: 'pointer'
                 }}
-              />
+              >
+                {discoveredDevices.length === 0 ? (
+                  <option value="" disabled>
+                    🔍 Scanning network for Master Nodes...
+                  </option>
+                ) : (
+                  discoveredDevices.map((dev) => (
+                    <option key={dev.ip} value={dev.ip}>
+                      ⚡ {dev.id} — {dev.ip}:{dev.port || 8081} ({dev.mode || 'STA'})
+                    </option>
+                  ))
+                )}
+                <option value="__manual__">⚙️ Enter Custom / Manual IP Address...</option>
+              </select>
+
+              {activeDiscoveredNode && !isManualMode && (
+                <div
+                  style={{
+                    marginTop: '8px',
+                    padding: '8px 12px',
+                    borderRadius: '6px',
+                    backgroundColor: 'rgba(56, 211, 159, 0.12)',
+                    border: '1px solid rgba(56, 211, 159, 0.3)',
+                    fontSize: '12px',
+                    color: 'var(--status-good)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}
+                >
+                  <span>🟢</span>
+                  <span>
+                    Detected <strong>{activeDiscoveredNode.id}</strong> on <code>{activeDiscoveredNode.ip}</code> (WebSocket Port {activeDiscoveredNode.port || 8081})
+                  </span>
+                </div>
+              )}
+
+              {discoveredDevices.length === 0 && !isManualMode && (
+                <div
+                  style={{
+                    marginTop: '8px',
+                    padding: '10px 14px',
+                    borderRadius: '6px',
+                    backgroundColor: 'rgba(59, 130, 246, 0.08)',
+                    border: '1px solid rgba(59, 130, 246, 0.25)',
+                    fontSize: '12px',
+                    color: 'var(--ev-c-text-2)',
+                    lineHeight: 1.5
+                  }}
+                >
+                  <span style={{ color: '#4aa8ff', fontWeight: 600, display: 'block', marginBottom: '2px' }}>
+                    🔍 Listening for Master Node presence beacons...
+                  </span>
+                  <span>
+                    When your Master Node joins Wi-Fi, it will automatically appear in this dropdown. You can also select <strong>"Enter Custom / Manual IP Address..."</strong> above.
+                  </span>
+                </div>
+              )}
             </div>
 
-            {/* Facility / Station Name */}
-            <div>
-              <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '6px', color: 'var(--ev-c-text-1)' }}>
-                Station / Facility Name:
-              </label>
-              <input
-                type="text"
-                value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)}
-                placeholder="AquaLoRa Master Node"
-                style={{
-                  width: '100%',
-                  padding: '10px 14px',
-                  borderRadius: '6px',
-                  border: '1px solid var(--color-border)',
-                  backgroundColor: 'var(--color-background)',
-                  color: 'var(--ev-c-text-1)',
-                  fontSize: '14px'
-                }}
-              />
-            </div>
+            {/* If Manual Mode is picked, show direct IP input */}
+            {isManualMode && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '4px', color: 'var(--ev-c-text-2)' }}>
+                    Manual WebSocket Address:
+                  </label>
+                  <input
+                    type="text"
+                    value={nodeWsUrl}
+                    onChange={(e) => setNodeWsUrl(e.target.value)}
+                    placeholder="ws://10.41.47.240:8081 or ws://aqualora.local:8081"
+                    style={{
+                      width: '100%',
+                      padding: '10px 14px',
+                      borderRadius: '6px',
+                      border: '1px solid var(--color-border)',
+                      backgroundColor: 'var(--color-background)',
+                      color: 'var(--ev-c-text-1)',
+                      fontSize: '13px',
+                      fontFamily: 'monospace'
+                    }}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '4px', color: 'var(--ev-c-text-2)' }}>
+                    Master Node Code:
+                  </label>
+                  <input
+                    type="text"
+                    value={nodeCode}
+                    onChange={(e) => setNodeCode(e.target.value)}
+                    placeholder="master-node"
+                    style={{
+                      width: '100%',
+                      padding: '10px 14px',
+                      borderRadius: '6px',
+                      border: '1px solid var(--color-border)',
+                      backgroundColor: 'var(--color-background)',
+                      color: 'var(--ev-c-text-1)',
+                      fontSize: '13px'
+                    }}
+                  />
+                </div>
+              </div>
+            )}
 
-            {/* Password */}
+            {/* 2. PASSWORD INPUT */}
             <div>
               <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '6px', color: 'var(--ev-c-text-1)' }}>
                 Master Node Password:
               </label>
-              <input
-                type="password"
-                value={pairingPassword}
-                onChange={(e) => setPairingPassword(e.target.value)}
-                placeholder="aqualora123"
-                style={{
-                  width: '100%',
-                  padding: '10px 14px',
-                  borderRadius: '6px',
-                  border: '1px solid var(--color-border)',
-                  backgroundColor: 'var(--color-background)',
-                  color: 'var(--ev-c-text-1)',
-                  fontSize: '14px'
-                }}
-              />
+              <div style={{ position: 'relative' }}>
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  value={pairingPassword}
+                  onChange={(e) => setPairingPassword(e.target.value)}
+                  placeholder="aqualora123"
+                  style={{
+                    width: '100%',
+                    padding: '10px 40px 10px 14px',
+                    borderRadius: '6px',
+                    border: '1px solid var(--color-border)',
+                    backgroundColor: 'var(--color-background)',
+                    color: 'var(--ev-c-text-1)',
+                    fontSize: '14px'
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  style={{
+                    position: 'absolute',
+                    right: '10px',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    fontSize: '15px',
+                    padding: 0,
+                    opacity: 0.7
+                  }}
+                  title={showPassword ? 'Hide password' : 'Show password'}
+                >
+                  {showPassword ? '🙈' : '👁️'}
+                </button>
+              </div>
               <span style={{ fontSize: '11px', color: 'var(--ev-c-text-3)', display: 'block', marginTop: '4px' }}>
-                Default firmware password is <code>aqualora123</code>. Derives the AES-256-GCM encryption key.
+                Default password is <code>aqualora123</code>. Derives the AES-256-GCM telemetry encryption key.
               </span>
             </div>
 
-            {/* Advanced Settings Toggle */}
-            <div>
+            {/* 3. ADVANCED SETTINGS COLLAPSIBLE */}
+            <div style={{ marginTop: '4px' }}>
               <button
                 type="button"
                 className="apply-btn"
                 onClick={() => setShowAdvanced(!showAdvanced)}
                 style={{ fontSize: '11px', padding: '4px 10px' }}
               >
-                {showAdvanced ? 'Hide Advanced Settings ▲' : 'Cloud Server Settings ▼'}
+                {showAdvanced ? 'Hide Advanced Options ▲' : '⚙️ Advanced Options ▼'}
               </button>
             </div>
 
             {showAdvanced && (
-              <div style={{ paddingTop: '8px', borderTop: '1px solid var(--color-border)' }}>
-                <label style={{ display: 'block', fontSize: '12px', color: 'var(--ev-c-text-2)', marginBottom: '4px' }}>
-                  Cloud Backend URL (Optional):
-                </label>
-                <input
-                  type="text"
-                  value={cloudUrl}
-                  onChange={(e) => setCloudUrl(e.target.value)}
-                  placeholder="https://aqualora.up.railway.app"
-                  style={{
-                    width: '100%',
-                    padding: '8px 12px',
-                    borderRadius: '6px',
-                    border: '1px solid var(--color-border)',
-                    backgroundColor: 'var(--color-background)',
-                    color: 'var(--ev-c-text-1)',
-                    fontSize: '13px'
-                  }}
-                />
-                <span style={{ fontSize: '11px', color: 'var(--ev-c-text-3)', display: 'block', marginTop: '4px' }}>
-                  If unreachable, AquaLoRa automatically runs in offline mode without interruption.
-                </span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', paddingTop: '12px', borderTop: '1px solid var(--color-border)' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', color: 'var(--ev-c-text-2)', marginBottom: '4px' }}>
+                    Facility / Station Name:
+                  </label>
+                  <input
+                    type="text"
+                    value={displayName}
+                    onChange={(e) => setDisplayName(e.target.value)}
+                    placeholder="AquaLoRa Master Node"
+                    style={{
+                      width: '100%',
+                      padding: '8px 12px',
+                      borderRadius: '6px',
+                      border: '1px solid var(--color-border)',
+                      backgroundColor: 'var(--color-background)',
+                      color: 'var(--ev-c-text-1)',
+                      fontSize: '13px'
+                    }}
+                  />
+                </div>
+
+                {!isManualMode && (
+                  <div>
+                    <label style={{ display: 'block', fontSize: '12px', color: 'var(--ev-c-text-2)', marginBottom: '4px' }}>
+                      Resolved WebSocket URI:
+                    </label>
+                    <input
+                      type="text"
+                      value={nodeWsUrl}
+                      readOnly
+                      style={{
+                        width: '100%',
+                        padding: '8px 12px',
+                        borderRadius: '6px',
+                        border: '1px solid var(--color-border)',
+                        backgroundColor: 'var(--color-background-mute)',
+                        color: 'var(--ev-c-text-2)',
+                        fontSize: '12px',
+                        fontFamily: 'monospace'
+                      }}
+                    />
+                  </div>
+                )}
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', color: 'var(--ev-c-text-2)', marginBottom: '4px' }}>
+                    Cloud Sync API URL (Optional):
+                  </label>
+                  <input
+                    type="text"
+                    value={cloudUrl}
+                    onChange={(e) => setCloudUrl(e.target.value)}
+                    placeholder="https://aqualora.up.railway.app"
+                    style={{
+                      width: '100%',
+                      padding: '8px 12px',
+                      borderRadius: '6px',
+                      border: '1px solid var(--color-border)',
+                      backgroundColor: 'var(--color-background)',
+                      color: 'var(--ev-c-text-1)',
+                      fontSize: '13px'
+                    }}
+                  />
+                  <span style={{ fontSize: '11px', color: 'var(--ev-c-text-3)', display: 'block', marginTop: '4px' }}>
+                    If unreachable, AquaLoRa automatically operates in local offline mode without interruption.
+                  </span>
+                </div>
               </div>
             )}
           </div>
@@ -723,7 +910,7 @@ function ConnectDevicePage({ onComplete, isOnboarding = false }: ConnectDevicePa
                 marginBottom: '12px'
               }}
             >
-              ✅ {isNewNodeWarning ? 'New node registered! Local database reset. Opening Dashboard…' : 'Master Node paired and registered! Opening Dashboard…'}
+              ✅ {isNewNodeWarning ? 'Master Node paired & registered! Resetting local telemetry…' : 'Master Node paired & registered! Launching Dashboard…'}
             </div>
           )}
 
@@ -734,10 +921,10 @@ function ConnectDevicePage({ onComplete, isOnboarding = false }: ConnectDevicePa
             <button
               className="login-submit-btn"
               onClick={handleMasterNodeLogin}
-              disabled={isConnectingDevice || connectSuccess}
+              disabled={isConnectingDevice || connectSuccess || (!nodeWsUrl.trim() && !activeDiscoveredNode)}
               style={{ margin: 0 }}
             >
-              {isConnectingDevice ? 'Signing In & Pairing…' : 'Sign In & Launch Dashboard →'}
+              {isConnectingDevice ? 'Connecting & Pairing…' : '🚀 Connect & Launch Dashboard →'}
             </button>
           </div>
         </section>

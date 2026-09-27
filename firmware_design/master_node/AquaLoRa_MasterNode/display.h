@@ -20,26 +20,67 @@ extern Adafruit_SSD1306 display;
 static uint8_t g_oledI2CAddr = OLED_I2C_ADDRESS;
 
 /**
+ * @brief Unstick hung I2C bus by clocking SCL 9 times and generating a STOP condition.
+ */
+inline void recoverI2CBus(uint8_t sdaPin, uint8_t sclPin) {
+    pinMode(sdaPin, INPUT_PULLUP);
+    pinMode(sclPin, OUTPUT);
+    digitalWrite(sclPin, HIGH);
+    delayMicroseconds(10);
+
+    // If SDA is stuck LOW by a slave mid-transaction, pulse SCL 9 times
+    for (int i = 0; i < 9; i++) {
+        digitalWrite(sclPin, LOW);
+        delayMicroseconds(10);
+        digitalWrite(sclPin, HIGH);
+        delayMicroseconds(10);
+    }
+
+    // Generate I2C STOP condition
+    pinMode(sdaPin, OUTPUT);
+    digitalWrite(sdaPin, LOW);
+    delayMicroseconds(10);
+    digitalWrite(sclPin, HIGH);
+    delayMicroseconds(10);
+    digitalWrite(sdaPin, HIGH);
+    delayMicroseconds(10);
+
+    pinMode(sdaPin, INPUT_PULLUP);
+    pinMode(sclPin, INPUT_PULLUP);
+    delay(10);
+}
+
+/**
  * @brief Active I2C Bus Scanner to locate connected OLED screen address.
  * @return Discovered I2C address (0x3C, 0x3D, or 0x00 if not found).
  */
 inline uint8_t scanI2COLEDAddress() {
-    DEBUG_PRINTLN(F("[I2C SCAN] Scanning I2C bus..."));
+    Serial.printf("[I2C SCAN] Scanning I2C bus on SDA=GPIO%d, SCL=GPIO%d...\n", OLED_SDA, OLED_SCL);
     uint8_t foundAddr = 0x00;
+    int deviceCount = 0;
     
     for (uint8_t addr = 1; addr < 127; addr++) {
         Wire.beginTransmission(addr);
-        if (Wire.endTransmission() == 0) {
-            DEBUG_PRINTF("[I2C SCAN] Found I2C device at address 0x%02X!\n", addr);
+        uint8_t error = Wire.endTransmission();
+        if (error == 0) {
+            Serial.printf("[I2C SCAN] SUCCESS: Found I2C device at address 0x%02X!\n", addr);
+            deviceCount++;
             if (addr == 0x3C || addr == 0x3D) {
                 foundAddr = addr;
             }
         }
     }
     
-    if (foundAddr == 0x00) {
-        DEBUG_PRINTLN(F("[I2C SCAN] WARNING: No OLED display detected on I2C bus!"));
-        DEBUG_PRINTLN(F("[I2C SCAN] DIAGNOSTICS: Check VCC (3.3V), GND, SDA, SCL jumper wires."));
+    if (deviceCount == 0) {
+        Serial.println(F("[I2C SCAN] ⚠️ ERROR: No I2C devices responded!"));
+        Serial.println(F("[I2C SCAN] HARDWARE CHECKLIST FOR 1.3\" OLED (DM0056):"));
+        Serial.println(F("           1. POWER: DM0056 1.3\" module has an on-board 3.3V regulator (662K)."));
+        Serial.println(F("              Connecting VCC to ESP32 3.3V can cause undervoltage (~2.7V)."));
+        Serial.println(F("              RECOMMENDED: Connect OLED VCC to ESP32 5V (or VIN) pin!"));
+        Serial.println(F("           2. GND: Connect OLED GND to ESP32 GND."));
+        Serial.println(F("           3. SCL: Connect OLED SCL to ESP32 GPIO 22 (D22)."));
+        Serial.println(F("           4. SDA: Connect OLED SDA to ESP32 GPIO 21 (D21)."));
+        Serial.println(F("           5. PINOUT: Verify header order (some are GND-VCC-SCL-SDA, others VCC-GND-SCL-SDA)."));
     }
     return foundAddr;
 }
@@ -54,7 +95,7 @@ inline void initSH1106Hardware(uint8_t i2cAddr) {
         0x02,       // Set Low Column Address (2-pixel SH1106 offset)
         0x10,       // Set High Column Address
         0x40,       // Set Display Start Line 0
-        0x81, 0x80, // Set Contrast 128
+        0x81, 0xFF, // Set Max Contrast
         0xA1,       // Set Segment Re-map (ADC = 1, normal orientation)
         0xC8,       // Set COM Output Scan Direction (remapped)
         0xA6,       // Normal Display (non-inverted)
@@ -76,7 +117,7 @@ inline void initSH1106Hardware(uint8_t i2cAddr) {
 
 /**
  * @brief Render Adafruit_GFX framebuffer to hardware screen.
- * Automatically handles SH1106 132x64 page addressing mode with 2-pixel column offset!
+ * Supports standard SSD1306 (via display.display()) and SH1106 via 16-byte I2C chunking.
  */
 inline void renderDisplayHardware() {
 #if IS_SH1106_DISPLAY
@@ -87,7 +128,6 @@ inline void renderDisplayHardware() {
     }
 
     for (uint8_t page = 0; page < 8; page++) {
-        // Set Page Address and 2-pixel column offset for SH1106
         Wire.beginTransmission(g_oledI2CAddr);
         Wire.write(0x00);         // Control byte: Command mode
         Wire.write(0xB0 + page);  // Page 0..7
@@ -95,16 +135,12 @@ inline void renderDisplayHardware() {
         Wire.write(0x10);         // Column address high nibble = 0
         Wire.endTransmission();
 
-        // Write 128 bytes of pixel data for this page (split into two 64-byte transfers)
-        Wire.beginTransmission(g_oledI2CAddr);
-        Wire.write(0x40);         // Control byte: Data mode
-        Wire.write(&buf[page * 128], 64);
-        Wire.endTransmission();
-
-        Wire.beginTransmission(g_oledI2CAddr);
-        Wire.write(0x40);         // Control byte: Data mode
-        Wire.write(&buf[page * 128 + 64], 64);
-        Wire.endTransmission();
+        for (uint8_t chunk = 0; chunk < 8; chunk++) {
+            Wire.beginTransmission(g_oledI2CAddr);
+            Wire.write(0x40);     // Control byte: Data mode
+            Wire.write(&buf[page * 128 + (chunk * 16)], 16);
+            Wire.endTransmission();
+        }
     }
 #else
     display.display();
@@ -112,64 +148,82 @@ inline void renderDisplayHardware() {
 }
 
 /**
- * @brief Initialize the OLED Display over Wire I2C (GPIO 1/21 SDA, GPIO 22 SCL).
- * Supports both 1.3" SH1106 and 0.96" SSD1306 OLED displays.
+ * @brief Update Boot Status on OLED Display during setup.
+ */
+inline void updateDisplayBootStatus(const char *title, const char *status, const char *detail = "") {
+    display.clearDisplay();
+    display.setTextColor(SSD1306_WHITE);
+    display.setTextSize(1);
+    display.setCursor(0, 0);
+    display.println(F("===================="));
+    display.printf(" %s\n", title);
+    display.println(F("===================="));
+    display.setCursor(0, 30);
+    display.println(status);
+    if (detail && *detail) {
+        display.setCursor(0, 46);
+        display.println(detail);
+    }
+    renderDisplayHardware();
+}
+
+/**
+ * @brief Initialize the OLED Display over Wire I2C (GPIO 21 SDA, GPIO 22 SCL).
+ * Supports TRONIC.LK DM0056 1.3" / 0.96" SSD1306 OLED displays.
  * @return True if display initialized successfully.
  */
 inline bool initDisplay() {
-    DEBUG_PRINTLN(F("[OLED] Initializing I2C bus and OLED display driver..."));
+    Serial.println(F("[OLED] Initializing I2C bus and OLED display driver..."));
     
-    // Step 1: Start I2C bus at standard 100 kHz speed
+    // Step 1: Recover any stuck slave on I2C bus and set pull-ups
+    recoverI2CBus(OLED_SDA, OLED_SCL);
+
+    // Step 2: Start I2C bus at standard 100 kHz speed with safe timeout
     Wire.begin(OLED_SDA, OLED_SCL);
     Wire.setClock(100000); // 100 kHz I2C rate
-    delay(100);            // 100ms power stabilization delay
+    delay(50);             // Stabilization delay
 
     // Step 2: Perform I2C bus scan to find exact OLED hardware address
     g_oledI2CAddr = scanI2COLEDAddress();
     if (g_oledI2CAddr == 0x00) {
         g_oledI2CAddr = OLED_I2C_ADDRESS; // Default fallback to 0x3C
+        Serial.printf("[OLED] No I2C ack detected, attempting default address 0x%02X...\n", g_oledI2CAddr);
     }
 
-    // Step 3: Initialize GFX buffer in RAM
-    bool success = display.begin(SSD1306_SWITCHCAPVCC, g_oledI2CAddr, true, false);
+    // Step 3: Initialize Adafruit GFX display driver
+    bool success = display.begin(SSD1306_SWITCHCAPVCC, g_oledI2CAddr, false, false);
     if (!success) {
         uint8_t altAddr = (g_oledI2CAddr == 0x3C) ? 0x3D : 0x3C;
-        DEBUG_PRINTF("[OLED] Retrying GFX initialization at 0x%02X...\n", altAddr);
-        success = display.begin(SSD1306_SWITCHCAPVCC, altAddr, true, false);
+        Serial.printf("[OLED] Retrying GFX initialization at 0x%02X...\n", altAddr);
+        success = display.begin(SSD1306_SWITCHCAPVCC, altAddr, false, false);
         if (success) g_oledI2CAddr = altAddr;
     }
 
     if (!success) {
-        DEBUG_PRINTLN(F("[OLED] ERROR: Display GFX allocation failed!"));
+        Serial.println(F("[OLED] ERROR: Display GFX allocation / initialization failed!"));
         return false;
     }
 
 #if IS_SH1106_DISPLAY
-    DEBUG_PRINTLN(F("[OLED] Configuring 1.3\" SH1106 controller hardware registers..."));
+    Serial.println(F("[OLED] Configuring 1.3\" SH1106 controller hardware registers..."));
     initSH1106Hardware(g_oledI2CAddr);
+#else
+    // Explicitly power on SSD1306 display panel and set high contrast
+    display.ssd1306_command(SSD1306_DISPLAYON);
+    display.dim(false);
 #endif
 
-    // Step 4: Clear uninitialized RAM noise ("messy white dots")
+    // Step 4: Clear uninitialized RAM noise
     display.clearDisplay();
     renderDisplayHardware();
-    delay(50);
+    delay(20);
 
-    // Step 5: Configure text properties
+    // Step 5: Configure text properties and render initial boot screen
     display.setTextColor(SSD1306_WHITE);
     display.setTextSize(1);
-    
-    // Step 6: Render Boot Splash Screen
-    display.setCursor(0, 0);
-    display.println(F("===================="));
-    display.println(F("  AQUALORA MASTER   "));
-    display.println(F(" Telemetry Receiver "));
-    display.println(F("===================="));
-    display.setCursor(0, 40);
-    display.println(F("Waiting for LoRa... "));
-    display.println(F("Listening on 433MHz "));
-    renderDisplayHardware();
+    updateDisplayBootStatus("AQUALORA MASTER", "Booting system...", "Init Wi-Fi & LoRa...");
 
-    DEBUG_PRINTLN(F("[OLED] OLED Display initialized successfully!"));
+    Serial.printf("[OLED] OLED Display initialized successfully at address 0x%02X!\n", g_oledI2CAddr);
     return true;
 }
 

@@ -21,36 +21,53 @@
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 void setup() {
-    // Initialize Serial Debug Console (disabled if SDA is on GPIO 1 / TX0 to prevent UART collision)
-#if ENABLE_SERIAL_DEBUG
+    // Initialize Serial Debug Console
     Serial.begin(SERIAL_BAUD);
-    delay(100);
-    DEBUG_PRINTLN(F("\n=================================================="));
-    DEBUG_PRINTLN(F("    AquaLoRa Master Node Firmware Starting...     "));
-    DEBUG_PRINTLN(F("=================================================="));
-#endif
+    delay(50);
+    Serial.println(F("\n=================================================="));
+    Serial.println(F("    AquaLoRa Master Node Firmware Starting...     "));
+    Serial.println(F("=================================================="));
 
-    // Step 1: Initialize Wi-Fi AP & AES-256-GCM Encrypted WebSocket Server
-    bool wsOK = initSecureWebSocket();
-    if (!wsOK) {
-        DEBUG_PRINTLN(F("[BOOT] WARNING: Wi-Fi AP / WebSocket server failed to initialize!"));
-    }
-
-    // Step 2: Initialize 0.96" SSD1306 / 1.3" SH1106 OLED Display (GPIO 1 or 21 SDA, GPIO 22 SCL)
+    // Step 1: Initialize 0.96" / 1.3" SSD1306 OLED Display IMMEDIATELY
     bool displayOK = initDisplay();
     if (!displayOK) {
-        DEBUG_PRINTLN(F("[BOOT] WARNING: OLED display failed to initialize. Continuing Serial mode."));
+        Serial.println(F("[BOOT] WARNING: OLED display failed to initialize. Continuing Serial mode."));
+    }
+
+    // Step 2: Initialize Wi-Fi & AES-256-GCM Encrypted WebSocket Server
+    if (displayOK) {
+        updateDisplayBootStatus("AQUALORA MASTER", "Scanning Wi-Fi...", "Joining Hotspot");
+    }
+    bool wsOK = initSecureWebSocket();
+    if (!wsOK) {
+        Serial.println(F("[BOOT] WARNING: Wi-Fi / WebSocket server failed to initialize!"));
+    }
+    if (displayOK) {
+        if (WiFi.status() == WL_CONNECTED) {
+            String ipStr = "IP: " + WiFi.localIP().toString();
+            updateDisplayBootStatus("WIFI CONNECTED", WiFi.SSID().c_str(), ipStr.c_str());
+        } else {
+            updateDisplayBootStatus("WIFI RETRYING", "Check Hotspot 2.4G", "Auto-reconnect on");
+        }
+        delay(1000);
     }
 
     // Step 3: Initialize Ra-02 (SX1278) LoRa Transceiver (SPI: 18, 19, 23, 5, 27, 13)
+    if (displayOK) {
+        updateDisplayBootStatus("AQUALORA MASTER", "Init SX1278 LoRa...", "Freq: 433MHz SF7");
+    }
     bool loraOK = initLoRaMaster();
     if (!loraOK) {
-        DEBUG_PRINTLN(F("[BOOT] CRITICAL ERROR: Ra-02 LoRa failed to initialize!"));
+        Serial.println(F("[BOOT] CRITICAL ERROR: Ra-02 LoRa failed to initialize!"));
         showDisplayError("LoRa Ra-02 Init Fail!\nCheck SPI Pinout\nSCK:18, MISO:19\nMOSI:23, NSS:5");
     } else {
-        DEBUG_PRINTLN(F("[BOOT] Master Node system setup complete. Listening for LoRa telemetry & WebSocket clients..."));
+        Serial.println(F("[BOOT] Master Node system setup complete. Listening for LoRa telemetry & WebSocket clients..."));
+        if (displayOK) {
+            String ipStr = (WiFi.status() == WL_CONNECTED) ? "IP: " + WiFi.localIP().toString() : "Wi-Fi: Connecting...";
+            updateDisplayBootStatus("AQUALORA READY", "Listening 433MHz", ipStr.c_str());
+        }
     }
-    DEBUG_PRINTLN(F("==================================================\n"));
+    Serial.println(F("==================================================\n"));
 }
 
 void loop() {
