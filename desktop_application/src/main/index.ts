@@ -10,9 +10,13 @@ import {
   getRecentReadings,
   getLatestReadingsForAllNodes,
   batchInsertHistoricalReadings,
+  batchInsertHistoricalReadingsWithResult,
+  filterNewReadings,
   getReadingsInRange,
   readingsToCsv,
   insertAlert,
+  filterNewAlerts,
+  batchInsertHistoricalAlerts,
   getRecentAlerts,
   getAllRecentAlerts,
   acknowledgeAlert,
@@ -65,12 +69,12 @@ import { DecisionEngine } from './decisionEngine'
 import { scanNetworks, connectToNetwork, getCurrentConnection } from './wifiManager'
 import { startUdpDiscovery, stopUdpDiscovery, getDiscoveredDevices } from './udpDiscovery'
 import { deriveKeyFromPassword } from './secureChannel'
-import type { Score } from '../shared/types'
+import type { Score, CloudSyncStatus, SyncPhase } from '../shared/types'
 
 const OFFLINE_CHECK_INTERVAL_MS = 30_000
 const OFFLINE_THRESHOLD_MS = 5 * 60_000
-const CLOUD_SYNC_INTERVAL_MS = 2 * 60_000
-const NETWORK_CHECK_TIMEOUT_MS = 5_000
+const CLOUD_SYNC_INTERVAL_MS = 20_000
+const NETWORK_CHECK_TIMEOUT_MS = 4_000
 
 let mainWindow: BrowserWindow
 const masterNodeClient = new MasterNodeClient()
@@ -124,116 +128,355 @@ async function getCloudAuthToken(): Promise<string | null> {
 }
 
 /**
- * Check if internet is available via DNS lookup.
- * Attempts to resolve google-dns-a.google.com (IP 8.8.8.8).
- * Returns true if resolvable within timeout, false otherwise.
+ * Check if internet/cloud connectivity is available.
+ * Tests the cloud endpoint /health or uses DNS lookup fallback.
  */
 async function checkInternetConnectivity(): Promise<boolean> {
+  const baseUrl = getSettingOptional('cloud_sync_url')?.trim() || 'https://aqualora.up.railway.app/api'
   try {
-    // Use DNS lookup as a lightweight internet check
-    const { promises: dnsPromises } = await import('dns')
-    const lookupPromise = dnsPromises.resolve4('google-dns-a.google.com')
-    const timeoutPromise = new Promise<never>((_resolve, reject) =>
-      setTimeout(() => reject(new Error('DNS timeout')), NETWORK_CHECK_TIMEOUT_MS)
-    )
-    await Promise.race([lookupPromise, timeoutPromise])
-    return true
-  } catch (err) {
-    console.debug('[main] Internet check failed (assumed offline):', err instanceof Error ? err.message : String(err))
-    return false
+    const healthUrl = resolveCloudUrl('/health', baseUrl)
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), NETWORK_CHECK_TIMEOUT_MS)
+    try {
+      const res = await fetch(healthUrl, { method: 'GET', signal: controller.signal })
+      return res.ok || res.status < 500
+    } finally {
+      clearTimeout(timeoutId)
+    }
+  } catch {
+    // If direct health check failed, check DNS resolution of host
+    try {
+      const host = new URL(baseUrl.startsWith('http') ? baseUrl : `http://${baseUrl}`).hostname
+      const { promises: dnsPromises } = await import('dns')
+      await dnsPromises.lookup(host)
+      return true
+    } catch {
+      return false
+    }
+  }
+}
+
+let isSyncInProgress = false
+let currentSyncPhase: SyncPhase = 'idle'
+
+function notifySyncStatus(status: CloudSyncStatus): void {
+  mainWindow?.webContents.send('cloud:sync-status', status)
+}
+
+async function performCloudSync(isManual = false): Promise<CloudSyncStatus> {
+  if (isSyncInProgress) {
+    return { ...getCloudSyncStatus(), isSyncing: true, syncPhase: currentSyncPhase }
+  }
+
+  isSyncInProgress = true
+  const baseUrl = getSettingOptional('cloud_sync_url')?.trim() || 'https://aqualora.up.railway.app/api'
+  const activeCode = getActiveMasterNodeCode() || getSettingOptional('master_node_code')
+
+  try {
+    // 1. Check internet connectivity
+    const hasInternet = await checkInternetConnectivity()
+    if (!hasInternet) {
+      const status: CloudSyncStatus = {
+        ...getCloudSyncStatus(),
+        isSyncing: false,
+        isOnline: false,
+        syncPhase: 'error'
+      }
+      notifySyncStatus(status)
+      if (isManual) {
+        throw new Error('Cloud backend is unreachable. Telemetry is preserved locally in offline mode.')
+      }
+      return status
+    }
+
+    // 2. Authenticate or refresh session token
+    let accessToken = await getCloudAuthToken()
+    if ((!accessToken || accessToken.startsWith('local-')) && activeCode) {
+      try {
+        const loginUrl = resolveCloudUrl('/auth/login', baseUrl)
+        const res = await fetch(loginUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            node_code: activeCode,
+            password: 'aqualora123',
+            client: 'desktop'
+          })
+        })
+        if (res.ok) {
+          const data = (await res.json()) as any
+          const token = data.access_token || data.token
+          if (token) {
+            saveCloudSession({
+              token,
+              masterNodeId: data.master_node_id || 1,
+              nodeCode: data.node_code || activeCode,
+              displayName: data.display_name || activeCode,
+              role: data.role || 'customer',
+              savedAt: new Date().toISOString()
+            })
+            accessToken = token
+          }
+        }
+      } catch (authErr) {
+        console.warn('[main] Background cloud auto-authentication attempt failed:', authErr)
+      }
+    }
+
+    if (!accessToken || accessToken.startsWith('local-')) {
+      const status: CloudSyncStatus = {
+        ...getCloudSyncStatus(),
+        isSyncing: false,
+        isOnline: false,
+        syncPhase: 'error'
+      }
+      notifySyncStatus(status)
+      if (isManual) {
+        throw new Error('Not authenticated to cloud backend. Please activate Master Node cloud session.')
+      }
+      return status
+    }
+
+    const headers = {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${accessToken}`
+    }
+
+    // 3. Checking Phase
+    currentSyncPhase = 'checking'
+    notifySyncStatus({
+      ...getCloudSyncStatus(),
+      isSyncing: true,
+      syncPhase: 'checking',
+      isOnline: true
+    })
+
+    const pendingEntries = getPendingOutboxEntries(100)
+    const pendingAlerts = getPendingAlertOutboxEntries(100)
+    let totalUploaded = 0
+    let totalDownloaded = 0
+
+    // 4. Upload Phase: Send pending readings, alerts & node configurations
+    if (pendingEntries.length > 0 || pendingAlerts.length > 0) {
+      currentSyncPhase = 'uploading'
+      const pendingTotal = pendingEntries.length + pendingAlerts.length
+      notifySyncStatus({
+        ...getCloudSyncStatus(),
+        isSyncing: true,
+        syncPhase: 'uploading',
+        uploadedCount: pendingTotal,
+        isOnline: true
+      })
+
+      // Upload readings
+      if (pendingEntries.length > 0) {
+        const syncUrl = resolveCloudUrl('/readings/sync', baseUrl)
+        const readings = pendingEntries.map((entry) => JSON.parse(entry.payload_json))
+        const res = await fetch(syncUrl, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ readings })
+        })
+        if (!res.ok) {
+          const errDetail = `Readings sync failed: HTTP ${res.status}: ${res.statusText}`
+          for (const entry of pendingEntries) {
+            markOutboxFailed(entry.id, errDetail)
+          }
+          throw new Error(errDetail)
+        }
+        markOutboxSynced(pendingEntries.map((entry) => entry.id))
+        totalUploaded += readings.length
+      }
+
+      // Upload alerts
+      if (pendingAlerts.length > 0) {
+        const alertSyncUrl = resolveCloudUrl('/alerts/sync', baseUrl)
+        const alerts = pendingAlerts.map((entry) => JSON.parse(entry.payload_json))
+        const res = await fetch(alertSyncUrl, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ alerts })
+        })
+        if (!res.ok) {
+          const errDetail = `Alerts sync failed: HTTP ${res.status}: ${res.statusText}`
+          for (const entry of pendingAlerts) {
+            markAlertOutboxFailed(entry.id, errDetail)
+          }
+          throw new Error(errDetail)
+        }
+        markAlertOutboxSynced(pendingAlerts.map((entry) => entry.id))
+        totalUploaded += alerts.length
+      }
+
+      // Also sync local node configurations to cloud
+      try {
+        const nodesSyncUrl = resolveCloudUrl('/nodes/sync', baseUrl)
+        const allNodes = getAllNodes(activeCode ?? undefined)
+        if (allNodes.length > 0) {
+          const payload = allNodes.map((n: any) => ({
+            node_id: n.id,
+            name: n.name ?? null,
+            location: n.location ?? null,
+            pond_type: getNodePondType(n.id) ?? 'tilapia',
+            custom_profile: getNodeCustomProfile(n.id) ?? null
+          }))
+          await fetch(nodesSyncUrl, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ nodes: payload })
+          })
+        }
+      } catch (nodeErr) {
+        console.warn('[main] Node sync upload non-critical warning:', nodeErr)
+      }
+    }
+
+    // 5. Download Phase: Fetch cloud telemetry, alerts, and node configurations
+    currentSyncPhase = 'downloading'
+    notifySyncStatus({
+      ...getCloudSyncStatus(),
+      isSyncing: true,
+      syncPhase: 'downloading',
+      isOnline: true
+    })
+
+    try {
+      const [historyResponse, alertsResponse, nodesResponse, profileResponse] = await Promise.all([
+        fetch(resolveCloudUrl('/readings/history?limit=300', baseUrl), { headers }),
+        fetch(resolveCloudUrl('/alerts/history?limit=100', baseUrl), { headers }),
+        fetch(resolveCloudUrl('/nodes', baseUrl), { headers }),
+        fetch(resolveCloudUrl('/master-nodes/me', baseUrl), { headers })
+      ])
+
+      // 5a. Download and sync nodes
+      if (nodesResponse.ok) {
+        const payload = (await nodesResponse.json()) as any
+        const cloudNodes = Array.isArray(payload) ? payload : payload.nodes ?? payload.data ?? []
+        for (const cloudNode of cloudNodes) {
+          const id = cloudNode.node_id ?? cloudNode.id
+          if (!id) continue
+          const localNode = upsertNodeStub(String(id), activeCode ?? undefined)
+          if (cloudNode.name || cloudNode.display_name || cloudNode.location) {
+            upsertNode(
+              String(id),
+              cloudNode.name ?? cloudNode.display_name ?? localNode.name ?? String(id),
+              cloudNode.location ?? localNode.location ?? '',
+              activeCode ?? undefined
+            )
+          }
+          if (cloudNode.pond_type) setNodePondType(String(id), cloudNode.pond_type)
+          if (cloudNode.custom_profile) setNodeCustomProfile(String(id), cloudNode.custom_profile)
+          mainWindow?.webContents.send(
+            'node:updated',
+            getAllNodes(activeCode ?? undefined).find((n) => n.id === String(id)) ?? localNode
+          )
+        }
+      }
+
+      // 5b. Download and sync readings
+      if (historyResponse.ok) {
+        const payload = (await historyResponse.json()) as any
+        const rows = Array.isArray(payload) ? payload : payload.readings ?? payload.data ?? []
+        const cloudReadings = rows
+          .map((row: any) => ({
+            ...row,
+            node_id: String(row.node_id ?? row.nodeId),
+            timestamp: row.timestamp ?? row.created_at
+          }))
+          .filter((row: any) => row.node_id && row.timestamp && row.temperature != null)
+          .filter((row: any) => !row.master_node_code || row.master_node_code === activeCode)
+
+        const newReadings = filterNewReadings(cloudReadings)
+        if (newReadings.length > 0) {
+          const { inserted } = batchInsertHistoricalReadingsWithResult(
+            newReadings,
+            activeCode ?? undefined
+          )
+          totalDownloaded += inserted.length
+          for (const reading of inserted) {
+            mainWindow?.webContents.send('reading:new', reading)
+          }
+        }
+      }
+
+      // 5c. Download and sync alerts
+      if (alertsResponse.ok) {
+        const payload = (await alertsResponse.json()) as any
+        const rows = Array.isArray(payload) ? payload : payload.alerts ?? payload.data ?? []
+        const cloudAlerts = rows.filter((a: any) => a.node_id && a.timestamp && a.parameter)
+        const newAlerts = filterNewAlerts(cloudAlerts)
+        if (newAlerts.length > 0) {
+          const insertedAlerts = batchInsertHistoricalAlerts(newAlerts, activeCode ?? undefined)
+          totalDownloaded += insertedAlerts.length
+          for (const alert of insertedAlerts) {
+            mainWindow?.webContents.send('alert:new', alert)
+          }
+        }
+      }
+
+      // 5d. Master Node Profile update
+      if (profileResponse.ok) {
+        const me = (await profileResponse.json()) as any
+        if (me && me.display_name && activeCode) {
+          registerOrUpdateMasterNode(activeCode, me.display_name)
+        }
+      }
+    } catch (downloadErr) {
+      console.warn('[main] Cloud download phase non-critical warning:', downloadErr)
+    }
+
+    // 6. Complete Synced Phase
+    setSetting('cloud_sync_last_error', '')
+    currentSyncPhase = 'synced'
+    const finalStatus: CloudSyncStatus = {
+      ...getCloudSyncStatus(),
+      isSyncing: false,
+      syncPhase: 'synced',
+      isOnline: true,
+      lastError: null,
+      uploadedCount: totalUploaded,
+      downloadedCount: totalDownloaded,
+      downloadPendingCount: 0
+    }
+    notifySyncStatus(finalStatus)
+
+    // Briefly hold the 'synced' state, then transition to 'idle'
+    setTimeout(() => {
+      if (!isSyncInProgress) {
+        currentSyncPhase = 'idle'
+        notifySyncStatus({
+          ...getCloudSyncStatus(),
+          isSyncing: false,
+          syncPhase: 'idle',
+          isOnline: true,
+          uploadedCount: 0,
+          downloadedCount: 0
+        })
+      }
+    }, 3500)
+
+    return finalStatus
+  } catch (error: any) {
+    const message = error instanceof Error ? error.message : 'Unknown cloud sync error'
+    setSetting('cloud_sync_last_error', message)
+    currentSyncPhase = 'error'
+    const errStatus: CloudSyncStatus = {
+      ...getCloudSyncStatus(),
+      isSyncing: false,
+      syncPhase: 'error',
+      isOnline: false,
+      lastError: message
+    }
+    notifySyncStatus(errStatus)
+    if (isManual) throw error
+    return errStatus
+  } finally {
+    isSyncInProgress = false
   }
 }
 
 async function syncQueuedReadings(isManual = false): Promise<void> {
-  const baseUrl = getSettingOptional('cloud_sync_url')?.trim()
-  if (!baseUrl) {
-    return
-  }
-
-  const pendingEntries = getPendingOutboxEntries(100)
-  const pendingAlerts = getPendingAlertOutboxEntries(100)
-  
-  if (pendingEntries.length === 0 && pendingAlerts.length === 0) {
-    const status = getCloudSyncStatus()
-    mainWindow?.webContents.send('cloud:sync-status', { ...status, isSyncing: false, isOnline: true })
-    return
-  }
-
-  // Check internet connectivity only for automatic syncs (not manual)
-  if (!isManual) {
-    const hasInternet = await checkInternetConnectivity()
-    if (!hasInternet) {
-      console.debug('[main] Skipping automatic cloud sync: no internet connectivity')
-      const status = getCloudSyncStatus()
-      mainWindow?.webContents.send('cloud:sync-status', { ...status, isSyncing: false, isOnline: false })
-      return
-    }
-  }
-
-  const accessToken = await getCloudAuthToken()
-  if (!accessToken) {
-    const status = getCloudSyncStatus()
-    mainWindow?.webContents.send('cloud:sync-status', { ...status, isSyncing: false, isOnline: false })
-    throw new Error('Not authenticated to cloud backend. Please activate Master Node cloud session.')
-  }
-
-  // Notify renderer that background sync is in progress (triggers animation)
-  mainWindow?.webContents.send('cloud:sync-status', { ...getCloudSyncStatus(), isSyncing: true, isOnline: true })
-
-  try {
-    // Sync readings
-    if (pendingEntries.length > 0) {
-      const syncUrl = resolveCloudUrl('/readings/sync', baseUrl)
-      const readings = pendingEntries.map((entry) => JSON.parse(entry.payload_json))
-
-      const response = await fetch(syncUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${accessToken}`
-        },
-        body: JSON.stringify({ readings })
-      })
-
-      if (!response.ok) {
-        throw new Error(`Readings sync failed: HTTP ${response.status}: ${response.statusText}`)
-      }
-
-      markOutboxSynced(pendingEntries.map((entry) => entry.id))
-    }
-
-    // Sync alerts
-    if (pendingAlerts.length > 0) {
-      const alertSyncUrl = resolveCloudUrl('/alerts/sync', baseUrl)
-      const alerts = pendingAlerts.map((entry) => JSON.parse(entry.payload_json))
-
-      const response = await fetch(alertSyncUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${accessToken}`
-        },
-        body: JSON.stringify({ alerts })
-      })
-
-      if (!response.ok) {
-        throw new Error(`Alerts sync failed: HTTP ${response.status}: ${response.statusText}`)
-      }
-
-      markAlertOutboxSynced(pendingAlerts.map((entry) => entry.id))
-    }
-
-    mainWindow?.webContents.send('cloud:sync-status', { ...getCloudSyncStatus(), isSyncing: false, isOnline: true })
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown cloud sync error'
-    for (const entry of pendingEntries) {
-      markOutboxFailed(entry.id, message)
-    }
-    for (const entry of pendingAlerts) {
-      markAlertOutboxFailed(entry.id, message)
-    }
-    mainWindow?.webContents.send('cloud:sync-status', { ...getCloudSyncStatus(), isSyncing: false, isOnline: false })
-  }
+  await performCloudSync(isManual)
 }
 
 function createWindow(): void {
@@ -652,11 +895,13 @@ app.whenReady().then(() => {
     }
   )
 
-  ipcMain.handle('cloud:sync-status', () => getCloudSyncStatus())
+  ipcMain.handle('cloud:sync-status', () => ({
+    ...getCloudSyncStatus(),
+    isSyncing: isSyncInProgress,
+    syncPhase: currentSyncPhase
+  }))
   ipcMain.handle('cloud:sync', async () => {
-    // Manual sync always attempts regardless of network (user can see the error)
-    await syncQueuedReadings(true)
-    return getCloudSyncStatus()
+    return await performCloudSync(true)
   })
 
   ipcMain.handle('cloud:login', async (_event, nodeCode: string, password: string) => {
@@ -900,13 +1145,13 @@ app.whenReady().then(() => {
     }
     mainWindow?.webContents.send('reading:new', reading)
 
-    // Debounced automatic background sync to cloud
+    // Debounced automatic background sync to cloud (2 seconds)
     if (cloudSyncDebounceTimer) clearTimeout(cloudSyncDebounceTimer)
     cloudSyncDebounceTimer = setTimeout(() => {
       void syncQueuedReadings(false).catch((err) => {
         console.debug('[main] Background sync on reading skipped:', err instanceof Error ? err.message : String(err))
       })
-    }, 4000)
+    }, 2000)
 
     decisionEngine.scoreReading(reading).then((result) => {
       if (!result) return
@@ -932,6 +1177,12 @@ app.whenReady().then(() => {
             master_node_code: activeCode
           })
           mainWindow?.webContents.send('alert:new', alert)
+
+          // Immediately sync critical/warning alert to cloud
+          if (cloudSyncDebounceTimer) clearTimeout(cloudSyncDebounceTimer)
+          cloudSyncDebounceTimer = setTimeout(() => {
+            void syncQueuedReadings(false).catch(() => {})
+          }, 1000)
         } catch (err) {
           console.error('[main] failed to persist alert:', err)
         }
@@ -1003,21 +1254,23 @@ app.whenReady().then(() => {
   setInterval(() => {
     void (async () => {
       try {
-        await syncQueuedReadings(false)
+        await performCloudSync(false)
       } catch (err) {
-        console.error('[main] Automatic cloud sync failed:', err instanceof Error ? err.message : String(err))
+        console.debug('[main] Automatic periodic cloud sync error:', err instanceof Error ? err.message : String(err))
       }
     })()
   }, CLOUD_SYNC_INTERVAL_MS)
 
-  // Initial sync on startup (waits for internet)
-  void (async () => {
-    try {
-      await syncQueuedReadings(false)
-    } catch (err) {
-      console.debug('[main] Startup cloud sync skipped (likely offline):', err instanceof Error ? err.message : String(err))
-    }
-  })()
+  // Initial sync on startup (delayed 3s so renderer window is mounted and receives live animation)
+  setTimeout(() => {
+    void (async () => {
+      try {
+        await performCloudSync(false)
+      } catch (err) {
+        console.debug('[main] Startup cloud sync skipped (likely offline):', err instanceof Error ? err.message : String(err))
+      }
+    })()
+  }, 3000)
 
   createWindow()
 

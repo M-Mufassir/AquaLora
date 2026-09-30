@@ -9,13 +9,20 @@ import SettingsPage from './pages/SettingsPage'
 import ConnectDevicePage from './pages/ConnectDevicePage'
 import MasterNodeProfilePage from './pages/MasterNodeProfilePage'
 
-function WindowTitleBar(): React.JSX.Element {
+function WindowTitleBar({ isSyncing }: { isSyncing?: boolean }): React.JSX.Element {
   return (
     <header className="window-titlebar">
       <div className="window-titlebar-brand">
-        <span className="window-titlebar-mark">◈</span>
+        <span
+          className={`window-titlebar-mark${isSyncing ? ' mark-syncing' : ''}`}
+          title={isSyncing ? 'Background cloud synchronization active' : 'AquaLoRa'}
+        >
+          ◈
+        </span>
         <span>AquaLoRa</span>
-        <span className="window-titlebar-caption">Desktop dashboard</span>
+        <span className="window-titlebar-caption">
+          {isSyncing ? 'Cloud sync active…' : 'Desktop dashboard'}
+        </span>
       </div>
       <div className="window-controls" aria-label="Window controls">
         <button type="button" onClick={() => window.api.windowControls.minimize()} aria-label="Minimize">
@@ -29,6 +36,154 @@ function WindowTitleBar(): React.JSX.Element {
         </button>
       </div>
     </header>
+  )
+}
+
+function CloudSyncPill({
+  syncStatus,
+  isManualSyncing,
+  onTriggerSync
+}: {
+  syncStatus: any
+  isManualSyncing: boolean
+  onTriggerSync: () => Promise<void>
+}): React.JSX.Element {
+  const isSyncActive = Boolean(syncStatus.isSyncing || isManualSyncing)
+  const phase = syncStatus.syncPhase ?? (isSyncActive ? 'syncing' : 'idle')
+
+  if (!syncStatus.enabled) {
+    return (
+      <div
+        className="nav-status-pill local-only"
+        title="Local database storage active. Cloud sync not configured."
+      >
+        <span className="pill-dot local" />
+        <span>Local Storage</span>
+      </div>
+    )
+  }
+
+  // Active sync states with animated icons & phase feedback
+  if (isSyncActive) {
+    if (phase === 'uploading') {
+      return (
+        <button
+          type="button"
+          className="nav-status-pill uploading"
+          title="Uploading local telemetry and configurations to cloud backend..."
+          disabled
+        >
+          <span className="pill-upload-icon">↑</span>
+          <span>Uploading{syncStatus.uploadedCount ? ` (${syncStatus.uploadedCount})` : ''}…</span>
+        </button>
+      )
+    }
+
+    if (phase === 'downloading') {
+      return (
+        <button
+          type="button"
+          className="nav-status-pill downloading"
+          title="Downloading cloud telemetry and updates to local database..."
+          disabled
+        >
+          <span className="pill-download-icon">↓</span>
+          <span>Downloading{syncStatus.downloadedCount ? ` (${syncStatus.downloadedCount})` : ''}…</span>
+        </button>
+      )
+    }
+
+    return (
+      <button
+        type="button"
+        className="nav-status-pill syncing"
+        title="Checking and synchronizing telemetry with cloud backend..."
+        disabled
+      >
+        <span className="pill-spin-icon">↻</span>
+        <span>{phase === 'checking' ? 'Checking…' : 'Syncing…'}</span>
+      </button>
+    )
+  }
+
+  // Offline / Error state
+  if (syncStatus.isOnline === false || syncStatus.lastError) {
+    return (
+      <button
+        type="button"
+        className="nav-status-pill offline clickable"
+        onClick={onTriggerSync}
+        title={
+          syncStatus.lastError
+            ? `Cloud sync error: ${syncStatus.lastError}. Click to retry.`
+            : 'Cloud offline. Data cached safely in local database. Click to retry.'
+        }
+      >
+        <span className="pill-dot offline" />
+        <span>Cloud Offline</span>
+      </button>
+    )
+  }
+
+  // Just completed sync state
+  if (phase === 'synced') {
+    const summary: string[] = []
+    if (syncStatus.uploadedCount) summary.push(`+${syncStatus.uploadedCount}↑`)
+    if (syncStatus.downloadedCount) summary.push(`+${syncStatus.downloadedCount}↓`)
+    const summaryText = summary.length ? ` (${summary.join(' ')})` : ''
+
+    return (
+      <button
+        type="button"
+        className="nav-status-pill synced just-synced clickable"
+        onClick={onTriggerSync}
+        title="Database is synchronized with cloud. Click to re-sync now."
+      >
+        <span className="pill-check-icon">✓</span>
+        <span>Synced{summaryText}</span>
+      </button>
+    )
+  }
+
+  // Pending changes queued or waiting to sync
+  const pendingUpload = syncStatus.pendingCount ?? 0
+  const pendingDownload = syncStatus.downloadPendingCount ?? 0
+  if (pendingUpload > 0 || pendingDownload > 0) {
+    let label = `${pendingUpload} Pending`
+    if (pendingUpload > 0 && pendingDownload > 0) {
+      label = `↑${pendingUpload} ↓${pendingDownload} Sync`
+    } else if (pendingDownload > 0) {
+      label = `↓${pendingDownload} in Cloud`
+    }
+
+    return (
+      <button
+        type="button"
+        className="nav-status-pill pending clickable"
+        onClick={onTriggerSync}
+        title={`${pendingUpload} upload(s) and ${pendingDownload} download(s) waiting. Click to sync immediately.`}
+      >
+        <span className="pill-dot pending" />
+        <span>{label}</span>
+      </button>
+    )
+  }
+
+  // Fully in sync / idle
+  return (
+    <button
+      type="button"
+      className="nav-status-pill synced clickable"
+      onClick={onTriggerSync}
+      title={
+        syncStatus.lastSyncedAt
+          ? `All telemetry synchronized. Last sync: ${new Date(syncStatus.lastSyncedAt).toLocaleTimeString()}. Click to sync now.`
+          : 'All telemetry synchronized with cloud. Click to sync now.'
+      }
+    >
+      <span className="pill-dot synced" />
+      <span>Cloud Synced</span>
+    </button>
   )
 }
 
@@ -179,7 +334,7 @@ function App(): React.JSX.Element {
   return (
     <HashRouter>
       <>
-        <WindowTitleBar />
+        <WindowTitleBar isSyncing={Boolean(syncStatus.isSyncing || isManualSyncing)} />
         <div className="app-shell">
         <FirstRunRedirect nodesLoaded={nodesLoaded} hasSession={Boolean(cloudSession || currentUser)} />
         <nav className="top-nav">
@@ -230,94 +385,22 @@ function App(): React.JSX.Element {
           )}
 
           {/* 2. Cloud Connection & Animated Sync Pill */}
-          {syncStatus.enabled ? (
-            syncStatus.isSyncing || isManualSyncing ? (
-              <button
-                type="button"
-                className="nav-status-pill syncing"
-                title="Synchronizing telemetry with cloud backend..."
-                disabled
-              >
-                <span className="pill-spin-icon">↻</span>
-                <span>Syncing…</span>
-              </button>
-            ) : syncStatus.isOnline === false || syncStatus.lastError ? (
-              <button
-                type="button"
-                className="nav-status-pill offline"
-                onClick={async () => {
-                  if (isManualSyncing) return
-                  setIsManualSyncing(true)
-                  try {
-                    const status = await window.api.syncCloudReadings()
-                    useReadingsStore.getState().setSyncStatus(status)
-                  } catch (err) {
-                    console.warn('[App] Manual sync retry failed:', err)
-                  } finally {
-                    setIsManualSyncing(false)
-                  }
-                }}
-                title={
-                  syncStatus.lastError
-                    ? `Cloud sync error: ${syncStatus.lastError}. Click to retry.`
-                    : 'Cloud offline. Data cached safely in local database. Click to retry.'
-                }
-              >
-                <span className="pill-dot offline" />
-                <span>Cloud Offline</span>
-              </button>
-            ) : syncStatus.pendingCount > 0 ? (
-              <button
-                type="button"
-                className="nav-status-pill pending"
-                onClick={async () => {
-                  if (isManualSyncing) return
-                  setIsManualSyncing(true)
-                  try {
-                    const status = await window.api.syncCloudReadings()
-                    useReadingsStore.getState().setSyncStatus(status)
-                  } catch (err) {
-                    console.warn('[App] Manual sync failed:', err)
-                  } finally {
-                    setIsManualSyncing(false)
-                  }
-                }}
-                title={`${syncStatus.pendingCount} records queued. Click to sync to cloud.`}
-              >
-                <span className="pill-dot pending" />
-                <span>{syncStatus.pendingCount} Pending</span>
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="nav-status-pill synced"
-                onClick={async () => {
-                  if (isManualSyncing) return
-                  setIsManualSyncing(true)
-                  try {
-                    const status = await window.api.syncCloudReadings()
-                    useReadingsStore.getState().setSyncStatus(status)
-                  } catch (err) {
-                    console.warn('[App] Manual sync failed:', err)
-                  } finally {
-                    setIsManualSyncing(false)
-                  }
-                }}
-                title="All telemetry synchronized with cloud. Click to sync now."
-              >
-                <span className="pill-dot synced" />
-                <span>Cloud Synced</span>
-              </button>
-            )
-          ) : (
-            <div
-              className="nav-status-pill local-only"
-              title="Local database storage active. Cloud sync not configured."
-            >
-              <span className="pill-dot local" />
-              <span>Local Storage</span>
-            </div>
-          )}
+          <CloudSyncPill
+            syncStatus={syncStatus}
+            isManualSyncing={isManualSyncing}
+            onTriggerSync={async () => {
+              if (isManualSyncing) return
+              setIsManualSyncing(true)
+              try {
+                const status = await window.api.syncCloudReadings()
+                useReadingsStore.getState().setSyncStatus(status)
+              } catch (err) {
+                console.warn('[App] Manual sync failed:', err)
+              } finally {
+                setIsManualSyncing(false)
+              }
+            }}
+          />
 
           <span className="nav-user">
             {currentUser.username} <span className="nav-user-role">({currentUser.role})</span>

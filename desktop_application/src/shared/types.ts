@@ -181,13 +181,19 @@ export interface OutboxEntry {
   last_error: string | null
 }
 
+export type SyncPhase = 'idle' | 'checking' | 'uploading' | 'downloading' | 'synced' | 'error'
+
 export interface CloudSyncStatus {
   enabled: boolean
   pendingCount: number
+  downloadPendingCount?: number
   lastSyncedAt: string | null
   lastError: string | null
   url: string | null
   isSyncing?: boolean
+  syncPhase?: SyncPhase
+  uploadedCount?: number
+  downloadedCount?: number
   isOnline?: boolean
 }
 

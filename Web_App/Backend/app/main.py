@@ -186,6 +186,7 @@ def startup_event() -> None:
 
 
 @app.get('/health')
+@app.get('/api/health')
 def health() -> dict[str, str]:
     return {'status': 'ok'}
 
@@ -237,11 +238,7 @@ def login(payload: LoginRequest) -> LoginResponse:
                 detail='Invalid credentials',
             )
 
-        if payload.client == 'web' and node.role != 'super_admin':
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail='The web console is restricted to administrators',
-            )
+        # Allow both super_admin and customer accounts on the web console
         if payload.client in ('mobile', 'desktop') and node.role == 'super_admin':
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -476,17 +473,70 @@ def update_master_node(
         )
 
 
+@app.get('/admin/readings/latest')
+def admin_readings_latest(
+    _: dict[str, Any] = Depends(require_super_admin),
+) -> list[dict[str, Any]]:
+    """Get the latest reading for every sensor node across all facilities"""
+    with get_session() as session:
+        # Get map of master node id to master node code & name
+        master_nodes = {mn.id: mn for mn in session.exec(select(MasterNode)).all()}
+        rows = session.exec(select(Reading).order_by(Reading.timestamp.desc())).all()
+        latest: dict[str, Reading] = {}
+        for row in rows:
+            key = f"{row.master_node_id}-{row.node_id}"
+            if key not in latest:
+                latest[key] = row
+
+        return [
+            {
+                'id': row.id,
+                'master_node_id': row.master_node_id,
+                'master_node_code': master_nodes.get(row.master_node_id).node_code if row.master_node_id in master_nodes else None,
+                'master_node_name': master_nodes.get(row.master_node_id).display_name if row.master_node_id in master_nodes else None,
+                'node_id': row.node_id,
+                'timestamp': row.timestamp,
+                'temperature': row.temperature,
+                'turbidity': row.turbidity,
+                'tds': row.tds,
+                'ph': row.ph,
+                'pond_type': row.pond_type,
+                'battery_pct': row.battery_pct,
+                'rssi': row.rssi,
+            }
+            for row in latest.values()
+        ]
+
+
 @app.get('/admin/readings/history')
 def admin_readings_history(
-    limit: int = Query(default=200, le=500),
+    node_id: str | None = Query(default=None),
+    master_node_id: int | None = Query(default=None),
+    start: str | None = Query(default=None),
+    end: str | None = Query(default=None),
+    limit: int = Query(default=300, le=1000),
     _: dict[str, Any] = Depends(require_super_admin),
 ) -> list[dict[str, Any]]:
     with get_session() as session:
-        rows = session.exec(select(Reading).order_by(Reading.timestamp.desc()).limit(limit)).all()
+        master_nodes = {mn.id: mn for mn in session.exec(select(MasterNode)).all()}
+        statement = select(Reading)
+        if node_id:
+            statement = statement.where(Reading.node_id == node_id)
+        if master_node_id:
+            statement = statement.where(Reading.master_node_id == master_node_id)
+        if start:
+            statement = statement.where(Reading.timestamp >= start)
+        if end:
+            statement = statement.where(Reading.timestamp <= end)
+        statement = statement.order_by(Reading.timestamp.desc()).limit(limit)
+        rows = session.exec(statement).all()
+
     return [
         {
             'id': row.id,
             'master_node_id': row.master_node_id,
+            'master_node_code': master_nodes.get(row.master_node_id).node_code if row.master_node_id in master_nodes else None,
+            'master_node_name': master_nodes.get(row.master_node_id).display_name if row.master_node_id in master_nodes else None,
             'node_id': row.node_id,
             'timestamp': row.timestamp,
             'temperature': row.temperature,
@@ -501,13 +551,69 @@ def admin_readings_history(
     ]
 
 
+@app.get('/dashboard/stats')
+def dashboard_stats(claims: dict[str, Any] = Depends(verify_token)) -> dict[str, Any]:
+    """Get system summary metrics for dashboard cards"""
+    is_admin = claims.get('role') == 'super_admin'
+    master_node_id = claims.get('master_node_id')
+
+    with get_session() as session:
+        if is_admin:
+            total_facilities = len(session.exec(select(MasterNode)).all())
+            readings_stmt = select(Reading).order_by(Reading.timestamp.desc()).limit(500)
+            alerts_stmt = select(Alert).order_by(Alert.timestamp.desc()).limit(200)
+            nodes_stmt = select(NodeConfig)
+        else:
+            total_facilities = 1
+            readings_stmt = select(Reading).where(Reading.master_node_id == master_node_id).order_by(Reading.timestamp.desc()).limit(500)
+            alerts_stmt = select(Alert).where(Alert.master_node_id == master_node_id).order_by(Alert.timestamp.desc()).limit(200)
+            nodes_stmt = select(NodeConfig).where(NodeConfig.master_node_id == master_node_id)
+
+        all_readings = session.exec(readings_stmt).all()
+        all_alerts = session.exec(alerts_stmt).all()
+        all_nodes = session.exec(nodes_stmt).all()
+
+        distinct_node_ids = set(r.node_id for r in all_readings).union(set(n.node_id for n in all_nodes))
+        critical_alerts = sum(1 for a in all_alerts if a.severity.lower() == 'critical')
+        warning_alerts = sum(1 for a in all_alerts if a.severity.lower() == 'warning')
+
+        # Compute parameter averages from latest readings
+        temps = [r.temperature for r in all_readings if r.temperature is not None]
+        phs = [r.ph for r in all_readings if r.ph is not None]
+        tdss = [r.tds for r in all_readings if r.tds is not None]
+        turbidities = [r.turbidity for r in all_readings if r.turbidity is not None]
+        batteries = [r.battery_pct for r in all_readings if r.battery_pct is not None]
+
+        return {
+            'total_facilities': total_facilities,
+            'total_sensor_nodes': len(distinct_node_ids),
+            'total_readings': len(all_readings),
+            'critical_alerts': critical_alerts,
+            'warning_alerts': warning_alerts,
+            'avg_temperature': round(sum(temps) / len(temps), 1) if temps else None,
+            'avg_ph': round(sum(phs) / len(phs), 2) if phs else None,
+            'avg_tds': round(sum(tdss) / len(tdss), 0) if tdss else None,
+            'avg_turbidity': round(sum(turbidities) / len(turbidities), 1) if turbidities else None,
+            'avg_battery': round(sum(batteries) / len(batteries), 0) if batteries else None,
+        }
+
+
 @app.get('/admin/alerts/history')
 def admin_alerts_history(
+    node_id: str | None = Query(default=None),
+    severity: str | None = Query(default=None),
     limit: int = Query(default=200, le=500),
     _: dict[str, Any] = Depends(require_super_admin),
 ) -> list[dict[str, Any]]:
     with get_session() as session:
-        rows = session.exec(select(Alert).order_by(Alert.timestamp.desc()).limit(limit)).all()
+        statement = select(Alert)
+        if node_id:
+            statement = statement.where(Alert.node_id == node_id)
+        if severity and severity != 'all':
+            statement = statement.where(Alert.severity == severity)
+        statement = statement.order_by(Alert.timestamp.desc()).limit(limit)
+        rows = session.exec(statement).all()
+
     return [
         {
             'id': row.id,

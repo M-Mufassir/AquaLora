@@ -374,19 +374,27 @@ export function markOutboxFailed(id: number, errorMessage: string): void {
 }
 
 export function getCloudSyncStatus(): CloudSyncStatus {
-  const pendingCount = Number(
+  const pendingOutbox = Number(
     (
       db.prepare('SELECT COUNT(*) AS count FROM outbox WHERE status IN (?, ?)').get('pending', 'failed') as {
         count: number
       }
     )?.count ?? 0
   )
+  const pendingAlertOutbox = Number(
+    (
+      db.prepare('SELECT COUNT(*) AS count FROM alert_outbox WHERE status IN (?, ?)').get('pending', 'failed') as {
+        count: number
+      }
+    )?.count ?? 0
+  )
+  const pendingCount = pendingOutbox + pendingAlertOutbox
   const lastSuccess = getSettingOptional('cloud_sync_last_success_at')
   const lastError = getSettingOptional('cloud_sync_last_error')
-  const cloudUrl = getSettingOptional('cloud_sync_url')
+  const cloudUrl = getSettingOptional('cloud_sync_url') || 'https://aqualora.up.railway.app/api'
 
   return {
-    enabled: Boolean(cloudUrl),
+    enabled: true,
     pendingCount,
     lastSyncedAt: lastSuccess,
     lastError,
@@ -496,11 +504,24 @@ export function getLatestReadingsForAllNodes(masterNodeCode?: string): Record<st
 }
 
 /**
- * Inserts historical readings in batch while ignoring records that already exist
- * (matching node_id and timestamp) without creating duplicate outbox queues.
+ * Filters out readings that already exist in the local SQLite database.
  */
-export function batchInsertHistoricalReadings(readings: Reading[], masterNodeCode?: string): number {
-  if (readings.length === 0) return 0
+export function filterNewReadings(readings: Reading[]): Reading[] {
+  if (readings.length === 0) return []
+  const checkStmt = db.prepare('SELECT 1 FROM readings WHERE node_id = ? AND timestamp = ? LIMIT 1')
+  return readings.filter((r) => !checkStmt.get(r.node_id, r.timestamp))
+}
+
+/**
+ * Inserts historical readings in batch while ignoring records that already exist
+ * (matching node_id and timestamp) without creating duplicate outbox queues,
+ * and returns both inserted count and the newly inserted reading records.
+ */
+export function batchInsertHistoricalReadingsWithResult(
+  readings: Reading[],
+  masterNodeCode?: string
+): { count: number; inserted: Reading[] } {
+  if (readings.length === 0) return { count: 0, inserted: [] }
   const code = masterNodeCode ?? getActiveMasterNodeCode()
   const insertStmt = db.prepare(
     `INSERT INTO readings (node_id, timestamp, temperature, turbidity, tds, ph, pond_type, master_node_code)
@@ -510,10 +531,10 @@ export function batchInsertHistoricalReadings(readings: Reading[], masterNodeCod
      )`
   )
 
+  const inserted: Reading[] = []
   const tx = db.transaction((items: Reading[]) => {
-    let count = 0
     for (const r of items) {
-      const enriched = {
+      const enriched: any = {
         node_id: r.node_id,
         timestamp: r.timestamp,
         temperature: r.temperature,
@@ -525,14 +546,22 @@ export function batchInsertHistoricalReadings(readings: Reading[], masterNodeCod
       }
       const res = insertStmt.run(enriched)
       if (res.changes > 0) {
-        count++
+        inserted.push({
+          ...enriched,
+          battery_pct: r.battery_pct ?? 0,
+          rssi: r.rssi ?? 0
+        })
         upsertNodeStub(r.node_id, code ?? undefined)
       }
     }
-    return count
   })
 
-  return tx(readings)
+  tx(readings)
+  return { count: inserted.length, inserted }
+}
+
+export function batchInsertHistoricalReadings(readings: Reading[], masterNodeCode?: string): number {
+  return batchInsertHistoricalReadingsWithResult(readings, masterNodeCode).count
 }
 
 export function getReadingsInRange(
@@ -596,6 +625,46 @@ export function insertAlert(alert: {
   
   return insertedAlert
 }
+
+export function filterNewAlerts(alerts: Array<{ node_id: string; timestamp: string; parameter: string }>): any[] {
+  if (alerts.length === 0) return []
+  const checkStmt = db.prepare(
+    'SELECT 1 FROM alerts WHERE node_id = ? AND timestamp = ? AND parameter = ? LIMIT 1'
+  )
+  return alerts.filter((a) => !checkStmt.get(a.node_id, a.timestamp, a.parameter))
+}
+
+export function batchInsertHistoricalAlerts(alerts: any[], masterNodeCode?: string): Alert[] {
+  if (alerts.length === 0) return []
+  const code = masterNodeCode ?? getActiveMasterNodeCode()
+  const insertStmt = db.prepare(`
+    INSERT INTO alerts (node_id, timestamp, parameter, severity, message, master_node_code, acknowledged)
+    SELECT @node_id, @timestamp, @parameter, @severity, @message, @master_node_code, 0
+    WHERE NOT EXISTS (
+      SELECT 1 FROM alerts WHERE node_id = @node_id AND timestamp = @timestamp AND parameter = @parameter
+    )
+  `)
+  const inserted: Alert[] = []
+  const tx = db.transaction((items: any[]) => {
+    for (const a of items) {
+      const row = {
+        node_id: a.node_id,
+        timestamp: a.timestamp,
+        parameter: a.parameter,
+        severity: a.severity,
+        message: a.message,
+        master_node_code: a.master_node_code ?? code
+      }
+      const res = insertStmt.run(row)
+      if (res.changes > 0) {
+        inserted.push({ ...row, id: Number(res.lastInsertRowid), acknowledged: 0 })
+      }
+    }
+  })
+  tx(alerts)
+  return inserted
+}
+
 
 export function getRecentAlerts(nodeId: string, limit = 50, masterNodeCode?: string): Alert[] {
   const code = masterNodeCode ?? getActiveMasterNodeCode()

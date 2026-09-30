@@ -14,9 +14,10 @@ body {
 
 :root[data-theme='light'] body {
   background:
-    radial-gradient(circle at top right, rgba(41, 118, 214, 0.12), transparent 25%),
-    radial-gradient(circle at left center, rgba(32, 164, 121, 0.12), transparent 26%),
-    linear-gradient(180deg, #edf7fb 0%, #eaf3f7 100%);
+    radial-gradient(circle at top right, rgba(2, 132, 199, 0.08), transparent 32%),
+    radial-gradient(circle at left center, rgba(5, 150, 105, 0.06), transparent 28%),
+    linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+  color: var(--ev-c-text-1);
 }
 
 code {
@@ -652,6 +653,50 @@ button.nav-status-pill:active:not(:disabled) {
   animation: pillRotate 1s linear infinite;
 }
 
+/* Cloud Uploading (Animated) */
+.nav-status-pill.uploading {
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.18), rgba(99, 102, 241, 0.18));
+  border-color: rgba(56, 189, 248, 0.55);
+  color: #38bdf8;
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.25);
+}
+
+.pill-upload-icon {
+  display: inline-block;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1;
+  animation: pillBounceUp 0.8s ease-in-out infinite;
+}
+
+/* Cloud Downloading (Animated) */
+.nav-status-pill.downloading {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.18), rgba(6, 182, 212, 0.18));
+  border-color: rgba(6, 182, 212, 0.55);
+  color: #22d3ee;
+  box-shadow: 0 0 10px rgba(6, 182, 212, 0.25);
+}
+
+.pill-download-icon {
+  display: inline-block;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1;
+  animation: pillBounceDown 0.8s ease-in-out infinite;
+}
+
+.pill-check-icon {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+  color: #10b981;
+}
+
+.nav-status-pill.just-synced {
+  animation: pillSuccessPulse 1.2s ease-out;
+}
+
 /* Cloud Pending */
 .nav-status-pill.pending {
   background: rgba(245, 158, 11, 0.12);
@@ -702,6 +747,59 @@ button.nav-status-pill:active:not(:disabled) {
   100% {
     transform: rotate(360deg);
   }
+}
+
+@keyframes pillBounceUp {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-3px);
+  }
+}
+
+@keyframes pillBounceDown {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(3px);
+  }
+}
+
+@keyframes pillSuccessPulse {
+  0% {
+    transform: scale(0.96);
+    box-shadow: 0 0 14px rgba(16, 185, 129, 0.8);
+    border-color: rgba(16, 185, 129, 0.9);
+  }
+  50% {
+    transform: scale(1.03);
+    box-shadow: 0 0 8px rgba(16, 185, 129, 0.4);
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: none;
+  }
+}
+
+/* Titlebar Mark Animation */
+@keyframes markGlow {
+  0%, 100% {
+    filter: drop-shadow(0 0 2px #38bdf8);
+    transform: scale(1);
+    color: #38bdf8;
+  }
+  50% {
+    filter: drop-shadow(0 0 8px #818cf8);
+    transform: scale(1.22);
+    color: #818cf8;
+  }
+}
+
+.window-titlebar-mark.mark-syncing {
+  animation: markGlow 1.2s ease-in-out infinite;
+  display: inline-block;
 }
 
 .cloud-migration-card {
@@ -2186,4 +2284,389 @@ button.nav-status-pill:active:not(:disabled) {
   margin-top: 20px;
   gap: 12px;
 }
+
+/* ==========================================================================
+   AQUALORA LIGHT THEME REDESIGN
+   Ultra-clean, crisp, accessible typography & high-contrast architectural UI
+   ========================================================================== */
+
+/* Window Titlebar */
+:root[data-theme='light'] .window-titlebar {
+  background: rgba(255, 255, 255, 0.96);
+  border-bottom: 1px solid var(--color-border);
+  color: var(--ev-c-text-2);
+}
+:root[data-theme='light'] .window-titlebar-caption {
+  color: var(--ev-c-text-3);
+}
+:root[data-theme='light'] .window-controls button {
+  color: var(--ev-c-text-2);
+}
+:root[data-theme='light'] .window-controls button:hover {
+  background: #f1f5f9;
+  color: var(--ev-c-text-1);
+}
+:root[data-theme='light'] .window-controls .window-close:hover {
+  background: #ef4444;
+  color: #ffffff;
+}
+
+/* Top Navigation Bar */
+:root[data-theme='light'] .top-nav {
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--color-border);
+  box-shadow: 0 2px 14px -2px rgba(15, 23, 42, 0.05);
+}
+:root[data-theme='light'] .app-title {
+  color: #0f172a;
+}
+:root[data-theme='light'] .nav-link {
+  color: #475569;
+  text-shadow: none;
+}
+:root[data-theme='light'] .nav-link:hover {
+  background-color: #f1f5f9;
+  color: #0f172a;
+}
+:root[data-theme='light'] .nav-link.active {
+  color: #0284c7;
+  background: #e0f2fe;
+  box-shadow: inset 0 0 0 1px #bae6fd;
+}
+:root[data-theme='light'] .nav-user {
+  color: #1e293b;
+}
+:root[data-theme='light'] .nav-user-role {
+  color: #64748b;
+}
+:root[data-theme='light'] .logout-btn {
+  background: #f1f5f9;
+  border: 1px solid var(--color-border);
+  color: #334155;
+}
+:root[data-theme='light'] .logout-btn:hover {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+:root[data-theme='light'] .theme-toggle-btn {
+  background: #f1f5f9;
+  border: 1px solid var(--color-border);
+  color: #0f172a;
+}
+:root[data-theme='light'] .theme-toggle-btn:hover {
+  background: #e2e8f0;
+}
+
+/* Status Pills in Light Mode */
+:root[data-theme='light'] .nav-status-pill.connected {
+  background: #ecfdf5;
+  border-color: #a7f3d0;
+  color: #047857;
+}
+:root[data-theme='light'] .nav-status-pill.reconnecting {
+  background: #fffbeb;
+  border-color: #fde68a;
+  color: #b45309;
+}
+:root[data-theme='light'] .nav-status-pill.synced {
+  background: #f0f9ff;
+  border-color: #bae6fd;
+  color: #0369a1;
+}
+:root[data-theme='light'] .nav-status-pill.syncing {
+  background: #eef2ff;
+  border-color: #c7d2fe;
+  color: #4338ca;
+}
+:root[data-theme='light'] .nav-status-pill.uploading {
+  background: #e0f2fe;
+  border-color: #38bdf8;
+  color: #0284c7;
+}
+:root[data-theme='light'] .nav-status-pill.downloading {
+  background: #ecfeff;
+  border-color: #06b6d4;
+  color: #0891b2;
+}
+:root[data-theme='light'] .nav-status-pill.pending {
+  background: #fffbeb;
+  border-color: #fde68a;
+  color: #b45309;
+}
+:root[data-theme='light'] .nav-status-pill.offline {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #b91c1c;
+}
+:root[data-theme='light'] .nav-status-pill.local-only {
+  background: #f1f5f9;
+  border-color: #e2e8f0;
+  color: #64748b;
+}
+
+/* Home Overview & Fleet Cards */
+:root[data-theme='light'] .stat-tile {
+  background: #ffffff;
+  border: 1px solid var(--color-border);
+  box-shadow: 0 4px 14px -2px rgba(15, 23, 42, 0.05);
+}
+:root[data-theme='light'] .stat-tile-value {
+  color: #0f172a;
+}
+:root[data-theme='light'] .stat-tile-label {
+  color: #64748b;
+}
+:root[data-theme='light'] .node-summary-card {
+  background: #ffffff;
+  border: 1px solid var(--color-border);
+  box-shadow: 0 4px 16px -2px rgba(15, 23, 42, 0.05);
+}
+:root[data-theme='light'] .node-summary-card:hover {
+  border-color: var(--color-border-hover);
+  box-shadow: 0 8px 24px -2px rgba(15, 23, 42, 0.08);
+}
+:root[data-theme='light'] .node-summary-name {
+  color: #0f172a;
+}
+:root[data-theme='light'] .node-summary-subtitle,
+:root[data-theme='light'] .node-summary-location {
+  color: #64748b;
+}
+
+/* Logs Detail & Sidebar */
+:root[data-theme='light'] .node-list {
+  background: #ffffff;
+  border: 1px solid var(--color-border);
+  box-shadow: 0 4px 14px -2px rgba(15, 23, 42, 0.04);
+}
+:root[data-theme='light'] .node-list-item {
+  color: #334155;
+}
+:root[data-theme='light'] .node-list-item:hover {
+  background: #f1f5f9;
+}
+:root[data-theme='light'] .node-list-item.active {
+  background: #e0f2fe;
+  color: #0284c7;
+  box-shadow: inset 0 0 0 1px #bae6fd;
+}
+:root[data-theme='light'] .detail-hero {
+  background: linear-gradient(135deg, #f0f9ff 0%, #ffffff 50%, #ecfdf5 100%);
+  border: 1px solid var(--color-border);
+  box-shadow: 0 6px 20px -2px rgba(15, 23, 42, 0.05);
+}
+:root[data-theme='light'] .detail-hero h1 {
+  color: #0f172a;
+}
+:root[data-theme='light'] .section-kicker {
+  color: #0284c7;
+}
+:root[data-theme='light'] .detail-stat-pill {
+  background: #ffffff;
+  border: 1px solid var(--color-border);
+}
+:root[data-theme='light'] .detail-stat-label {
+  color: #64748b;
+}
+:root[data-theme='light'] .detail-stat-pill strong {
+  color: #0f172a;
+}
+:root[data-theme='light'] .detail-panel-block {
+  background: #ffffff;
+  border: 1px solid var(--color-border);
+  box-shadow: 0 4px 14px -2px rgba(15, 23, 42, 0.04);
+}
+:root[data-theme='light'] .node-status-bar {
+  background: #f8fafc;
+  border: 1px solid var(--color-border);
+  color: #334155;
+}
+
+/* Gauges */
+:root[data-theme='light'] .gauge-track {
+  stroke: #e2e8f0;
+}
+:root[data-theme='light'] .gauge-number {
+  fill: #0f172a;
+}
+:root[data-theme='light'] .gauge-unit {
+  fill: #64748b;
+}
+:root[data-theme='light'] .gauge-label {
+  color: #475569;
+}
+
+/* Charts */
+:root[data-theme='light'] .chart-title {
+  color: #0f172a;
+}
+:root[data-theme='light'] .recharts-cartesian-grid-horizontal line,
+:root[data-theme='light'] .recharts-cartesian-grid-vertical line {
+  stroke: #e2e8f0 !important;
+}
+
+/* Settings, Tabs & Profiles */
+:root[data-theme='light'] .settings-tabs {
+  background: #f1f5f9;
+  border: 1px solid var(--color-border);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
+}
+:root[data-theme='light'] .tab-btn {
+  color: #475569;
+}
+:root[data-theme='light'] .tab-btn:hover {
+  color: #0f172a;
+  background: #e2e8f0;
+}
+:root[data-theme='light'] .tab-btn.active {
+  background: #ffffff;
+  color: #0284c7;
+  border-color: #cbd5e1;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.06);
+}
+:root[data-theme='light'] .settings-section {
+  background: #ffffff;
+  border: 1px solid var(--color-border);
+  box-shadow: 0 4px 14px -2px rgba(15, 23, 42, 0.04);
+}
+:root[data-theme='light'] .settings-section h2 {
+  color: #0f172a;
+}
+:root[data-theme='light'] .summary-card,
+:root[data-theme='light'] .farm-stat {
+  background: #f8fafc;
+  border: 1px solid var(--color-border);
+}
+:root[data-theme='light'] .summary-card span,
+:root[data-theme='light'] .farm-stat span {
+  color: #64748b;
+}
+:root[data-theme='light'] .summary-card strong,
+:root[data-theme='light'] .farm-stat strong {
+  color: #0f172a;
+}
+:root[data-theme='light'] .pond-card {
+  background: #ffffff;
+  border: 1px solid var(--color-border);
+  box-shadow: 0 4px 14px -2px rgba(15, 23, 42, 0.04);
+}
+:root[data-theme='light'] .pond-profile-editor {
+  background: #f8fafc;
+  border: 1px solid var(--color-border);
+}
+:root[data-theme='light'] .pond-card-grid label,
+:root[data-theme='light'] .saved-template-select-wrap label,
+:root[data-theme='light'] .threshold-editor label,
+:root[data-theme='light'] .profile-field label,
+:root[data-theme='light'] .connection-field label {
+  color: #475569;
+}
+
+/* Global Form Inputs, Selects & Buttons */
+:root[data-theme='light'] input,
+:root[data-theme='light'] select,
+:root[data-theme='light'] textarea,
+:root[data-theme='light'] .settings-row input,
+:root[data-theme='light'] .settings-row select,
+:root[data-theme='light'] .pond-card-grid select,
+:root[data-theme='light'] .pond-card-grid input,
+:root[data-theme='light'] .saved-template-select-wrap select,
+:root[data-theme='light'] .saved-template-select-wrap input,
+:root[data-theme='light'] .profile-field input,
+:root[data-theme='light'] .login-form input,
+:root[data-theme='light'] .modal-card input,
+:root[data-theme='light'] .threshold-editor input {
+  background: #ffffff !important;
+  border: 1px solid #cbd5e1 !important;
+  color: #0f172a !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04) !important;
+}
+:root[data-theme='light'] input:focus,
+:root[data-theme='light'] select:focus,
+:root[data-theme='light'] textarea:focus {
+  border-color: #0284c7 !important;
+  box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.15) !important;
+  outline: none;
+}
+:root[data-theme='light'] input::placeholder {
+  color: #94a3b8;
+}
+
+/* Alerts */
+:root[data-theme='light'] .alert-item {
+  background: #ffffff;
+  border: 1px solid var(--color-border);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.03);
+}
+:root[data-theme='light'] .alert-message {
+  color: #0f172a;
+}
+:root[data-theme='light'] .alert-time {
+  color: #64748b;
+}
+:root[data-theme='light'] .alert-ack-btn {
+  background: #f1f5f9;
+  border: 1px solid var(--color-border);
+  color: #334155;
+}
+:root[data-theme='light'] .alert-ack-btn:hover {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+/* Modals & Dialogs */
+:root[data-theme='light'] .modal-card,
+:root[data-theme='light'] .admin-redirect-card,
+:root[data-theme='light'] .login-form {
+  background: #ffffff;
+  border: 1px solid var(--color-border);
+  box-shadow: 0 20px 45px rgba(15, 23, 42, 0.12);
+  color: #0f172a;
+}
+:root[data-theme='light'] .modal-card h2,
+:root[data-theme='light'] .admin-redirect-card h2 {
+  color: #0f172a;
+}
+:root[data-theme='light'] .modal-card label,
+:root[data-theme='light'] .admin-redirect-card p {
+  color: #475569;
+}
+
+/* Connect Device & Wi-Fi Wizard */
+:root[data-theme='light'] .wifi-item {
+  background: #f8fafc;
+  border: 1px solid var(--color-border);
+  color: #0f172a;
+}
+:root[data-theme='light'] .wifi-item:hover {
+  background: #f1f5f9;
+}
+:root[data-theme='light'] .wizard-step-circle {
+  background: #ffffff;
+  border: 2px solid #cbd5e1;
+  color: #64748b;
+}
+:root[data-theme='light'] .wizard-step-label {
+  color: #475569;
+}
+:root[data-theme='light'] .wizard-step.active .wizard-step-label {
+  color: #0284c7;
+  font-weight: 700;
+}
+:root[data-theme='light'] .wizard-steps::before {
+  background: #e2e8f0;
+}
+:root[data-theme='light'] .device-card {
+  background: #ffffff;
+  border: 1px solid var(--color-border);
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.04);
+}
+:root[data-theme='light'] .device-id {
+  color: #0f172a;
+}
+:root[data-theme='light'] .device-meta {
+  color: #64748b;
+}
+
 
