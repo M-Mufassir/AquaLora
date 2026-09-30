@@ -56,6 +56,19 @@ export type DashboardStats = {
   avg_battery?: number | null
 }
 
+export type SensorNodeConfig = {
+  id: number
+  master_node_id: number
+  master_node_code?: string | null
+  master_node_name?: string | null
+  node_id: string
+  name?: string | null
+  location?: string | null
+  pond_type?: string | null
+  custom_profile?: any
+  updated_at?: string | null
+}
+
 export interface UserSession {
   access_token: string
   display_name: string
@@ -122,6 +135,10 @@ export const login = async (node_code: string, password: string) => {
   session.token = res.access_token
   session.user = res
   return res
+}
+
+export const deleteMasterNode = async (id: number): Promise<{ message: string }> => {
+  return await api<{ message: string }>(`/admin/master-nodes/${id}`, { method: 'DELETE' })
 }
 
 export function exportReadingsToCsv(readings: Reading[], filename = 'aqualora-readings.csv'): void {

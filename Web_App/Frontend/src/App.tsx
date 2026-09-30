@@ -53,6 +53,11 @@ import {
   Tag,
   TelemetryView
 } from './components'
+import {
+  FleetHealthGauge,
+  MiniSparkline,
+  WaterQualityChart
+} from './TelemetryChart'
 
 type View = 'overview' | 'nodes' | 'telemetry' | 'alerts'
 
@@ -231,6 +236,26 @@ export default function App() {
   const [autoRefreshInterval, setAutoRefreshInterval] = useState<number>(10)
   const autoRefreshTimerRef = useRef<any>(null)
 
+  // Global Facility Scope Filter
+  const [globalFacility, setGlobalFacility] = useState<string>('all')
+
+  const effectiveReadings = useMemo(() => {
+    if (globalFacility === 'all') return readings
+    return readings.filter(
+      (r) => r.master_node_code === globalFacility || String(r.master_node_id) === globalFacility
+    )
+  }, [readings, globalFacility])
+
+  const effectiveAlerts = useMemo(() => {
+    if (globalFacility === 'all') return alerts
+    const matchingMasterNode = nodes.find((n) => n.node_code === globalFacility)
+    return alerts.filter(
+      (a) =>
+        (matchingMasterNode && a.master_node_id === matchingMasterNode.id) ||
+        effectiveReadings.some((r) => r.node_id === a.node_id)
+    )
+  }, [alerts, globalFacility, nodes, effectiveReadings])
+
   const loadData = async (isBackground = false) => {
     if (!isBackground) setLoading(true)
     setError('')
@@ -402,6 +427,26 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-2.5 sm:gap-4">
+            {/* Global Facility Selector for Super Admin */}
+            {nodes.length > 0 && (
+              <div className="hidden md:flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-1.5 shadow-sm text-xs font-semibold text-slate-600">
+                <Server size={14} className="text-cyan-600" />
+                <span>Facility:</span>
+                <select
+                  value={globalFacility}
+                  onChange={(e) => setGlobalFacility(e.target.value)}
+                  className="bg-transparent font-bold text-slate-800 outline-none cursor-pointer max-w-[170px] truncate"
+                >
+                  <option value="all">All Facilities ({nodes.length})</option>
+                  {nodes.map((node) => (
+                    <option key={node.id} value={node.node_code}>
+                      {node.display_name} ({node.node_code})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
             {/* Auto-refresh interval selector */}
             <div className="hidden sm:flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 shadow-sm text-xs font-semibold text-slate-600">
               <Clock size={14} className="text-slate-400" />
@@ -471,8 +516,8 @@ export default function App() {
           {view === 'overview' && (
             <OverviewTab
               nodes={nodes}
-              readings={readings}
-              alerts={alerts}
+              readings={effectiveReadings}
+              alerts={effectiveAlerts}
               stats={stats}
               setView={setView}
               reload={() => loadData(false)}
@@ -480,12 +525,12 @@ export default function App() {
           )}
 
           {view === 'telemetry' && (
-            <TelemetryView nodes={nodes} readings={readings} reload={() => loadData(false)} />
+            <TelemetryView nodes={nodes} readings={effectiveReadings} reload={() => loadData(false)} />
           )}
 
           {view === 'nodes' && <NodesView nodes={nodes} reload={() => loadData(false)} />}
 
-          {view === 'alerts' && <AlertsView alerts={alerts} nodes={nodes} reload={() => loadData(false)} />}
+          {view === 'alerts' && <AlertsView alerts={effectiveAlerts} nodes={nodes} reload={() => loadData(false)} />}
         </main>
       </div>
     </div>
@@ -513,13 +558,60 @@ function OverviewTab({
   const distinctNodeIds = useMemo(() => new Set(readings.map((r) => r.node_id)), [readings])
   const activeCount = distinctNodeIds.size
   const criticalCount = alerts.filter((a) => a.severity.toLowerCase() === 'critical').length
+  const warningCount = alerts.filter((a) => a.severity.toLowerCase() === 'warning').length
 
-  const avgBattery = readings.length
-    ? Math.round(
-        readings.reduce((sum, r) => sum + (r.battery_pct ?? 0), 0) /
-          (readings.filter((r) => r.battery_pct != null).length || 1)
-      )
-    : 0
+  // Calculate fleet health index score (0 - 100)
+  const fleetHealthScore = useMemo(() => {
+    if (!readings.length) return 100
+    let totalScore = 0
+    let count = 0
+
+    for (const r of readings) {
+      let score = 100
+      if (r.temperature != null) {
+        if (r.temperature < 20 || r.temperature > 34) score -= 30
+        else if (r.temperature < 26 || r.temperature > 30) score -= 10
+      }
+      if (r.ph != null) {
+        if (r.ph < 6.0 || r.ph > 9.0) score -= 30
+        else if (r.ph < 6.5 || r.ph > 8.5) score -= 10
+      }
+      if (r.turbidity != null && r.turbidity > 30) {
+        score -= Math.min(25, (r.turbidity - 30) * 1.2)
+      }
+      if (r.tds != null && r.tds > 1000) {
+        score -= Math.min(25, (r.tds - 1000) / 40)
+      }
+      if (r.battery_pct != null && r.battery_pct < 20) {
+        score -= 15
+      }
+      totalScore += Math.max(0, score)
+      count++
+    }
+
+    return count ? Math.round(totalScore / count) : 100
+  }, [readings])
+
+  // Extract recent parameter arrays for sparklines and summary values
+  const paramStats = useMemo(() => {
+    const temps = readings.map((r) => r.temperature).filter((v): v is number => v != null)
+    const phs = readings.map((r) => r.ph).filter((v): v is number => v != null)
+    const turbidities = readings.map((r) => r.turbidity).filter((v): v is number => v != null)
+    const tdss = readings.map((r) => r.tds).filter((v): v is number => v != null)
+    const batteries = readings.map((r) => r.battery_pct).filter((v): v is number => v != null)
+
+    const avg = (arr: number[]) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null)
+    const min = (arr: number[]) => (arr.length ? Math.min(...arr) : null)
+    const max = (arr: number[]) => (arr.length ? Math.max(...arr) : null)
+
+    return {
+      temp: { avg: avg(temps), min: min(temps), max: max(temps), spark: temps.slice(-20) },
+      ph: { avg: avg(phs), min: min(phs), max: max(phs), spark: phs.slice(-20) },
+      turbidity: { avg: avg(turbidities), min: min(turbidities), max: max(turbidities), spark: turbidities.slice(-20) },
+      tds: { avg: avg(tdss), min: min(tdss), max: max(tdss), spark: tdss.slice(-20) },
+      battery: { avg: avg(batteries) != null ? Math.round(avg(batteries)!) : 100 }
+    }
+  }, [readings])
 
   return (
     <div className="animate-rise space-y-7">
@@ -528,142 +620,246 @@ function OverviewTab({
         <div>
           <div className="flex items-center gap-2">
             <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-            <p className="text-xs font-bold uppercase tracking-[0.2em] text-cyan-700">System Pulse</p>
+            <p className="text-xs font-bold uppercase tracking-[0.2em] text-cyan-700">Operations Pulse</p>
           </div>
-          <h1 className="mt-1 font-display text-3xl sm:text-4xl font-bold tracking-tight text-slate-950">
-            Aquaculture Operations Hub
+          <h1 className="mt-1 font-display text-3xl sm:text-4xl font-extrabold tracking-tight text-slate-950">
+            Super Administrator Control Room
           </h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Real-time multi-probe telemetry and autonomous background synchronization across all ponds.
+          <p className="mt-1 text-sm text-slate-500 max-w-2xl">
+            Live multi-facility IoT telemetry, automated background LoRa sync, and predictive water quality analytics.
           </p>
         </div>
 
-        <Tag color="emerald">
-          <CheckCircle2 size={13} /> All Systems Operational
-        </Tag>
+        <div className="flex items-center gap-2.5">
+          {criticalCount > 0 ? (
+            <Tag color="rose">
+              <AlertTriangle size={13} className="animate-pulse" /> {criticalCount} Critical Exceptions
+            </Tag>
+          ) : (
+            <Tag color="emerald">
+              <CheckCircle2 size={13} /> Fleet Telemetry Optimal
+            </Tag>
+          )}
+          <button
+            onClick={() => setView('telemetry')}
+            className="hidden sm:inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 py-1.5 text-xs font-bold text-slate-700 shadow-sm transition hover:bg-slate-50"
+          >
+            <BarChart3 size={14} className="text-cyan-600" /> Open Analytics Studio
+          </button>
+        </div>
       </div>
 
-      {/* KPI Stat Cards */}
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {/* Monitored Ponds */}
-        <div className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm">
-          <div className="flex items-start justify-between">
-            <div>
-              <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                Monitored Ponds / Probes
-              </p>
-              <p className="mt-2 font-display text-3xl font-bold text-slate-900">{activeCount}</p>
-            </div>
-            <div className="rounded-xl bg-cyan-50 p-2.5 text-cyan-700">
-              <Server size={20} />
+      {/* Executive Metric Cards Strip */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+        {/* Fleet Health Index Card */}
+        <div className="rounded-3xl border border-slate-200/90 bg-white p-5 shadow-sm flex flex-col justify-between">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
+              Fleet Health Index
+            </span>
+            <div className="rounded-xl bg-cyan-50 p-1.5 text-cyan-700">
+              <ShieldCheck size={16} />
             </div>
           </div>
-          <p className="mt-3 text-xs font-medium text-slate-500">
-            {nodes.length ? `${nodes.length} registered facilities` : 'Active wireless telemetry'}
-          </p>
+
+          <div className="my-2 flex justify-center">
+            <FleetHealthGauge score={fleetHealthScore} size={110} />
+          </div>
+
+          <div className="border-t border-slate-100 pt-2 text-[11px] text-slate-400 flex items-center justify-between">
+            <span>{readings.length} readings analyzed</span>
+            <span className="font-bold text-slate-700">{activeCount} probes</span>
+          </div>
         </div>
 
-        {/* Total Readings Ingested */}
-        <div className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm">
-          <div className="flex items-start justify-between">
-            <div>
-              <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                Readings Ingested
-              </p>
-              <p className="mt-2 font-display text-3xl font-bold text-slate-900">{readings.length}</p>
+        {/* Temperature KPI Tile */}
+        <div className="rounded-3xl border border-slate-200/90 bg-white p-5 shadow-sm flex flex-col justify-between transition hover:shadow-md">
+          <div>
+            <div className="flex items-center justify-between text-slate-400">
+              <span className="text-xs font-bold uppercase tracking-wider">Water Temp</span>
+              <div className="rounded-xl bg-cyan-50 p-2 text-cyan-700">
+                <Thermometer size={18} />
+              </div>
             </div>
-            <div className="rounded-xl bg-sky-50 p-2.5 text-sky-700">
-              <Activity size={20} />
+            <p className="mt-2 font-display text-3xl font-extrabold text-slate-900">
+              {paramStats.temp.avg != null ? `${paramStats.temp.avg.toFixed(1)}°C` : '--'}
+            </p>
+            <p className="text-[11px] font-semibold text-slate-400 mt-0.5">Fleet mean temperature</p>
+          </div>
+
+          {paramStats.temp.spark.length > 1 && (
+            <div className="my-2">
+              <MiniSparkline values={paramStats.temp.spark} color="#06b6d4" width={110} height={32} />
+            </div>
+          )}
+
+          <div className="border-t border-slate-100 pt-2 flex items-center justify-between text-xs text-slate-500">
+            <span>Target: <strong>26-30°C</strong></span>
+            <span className="font-bold text-cyan-700">
+              {paramStats.temp.min != null ? `${paramStats.temp.min.toFixed(0)}° - ${paramStats.temp.max?.toFixed(0)}°` : ''}
+            </span>
+          </div>
+        </div>
+
+        {/* pH Level KPI Tile */}
+        <div className="rounded-3xl border border-slate-200/90 bg-white p-5 shadow-sm flex flex-col justify-between transition hover:shadow-md">
+          <div>
+            <div className="flex items-center justify-between text-slate-400">
+              <span className="text-xs font-bold uppercase tracking-wider">pH Level</span>
+              <div className="rounded-xl bg-emerald-50 p-2 text-emerald-700">
+                <Droplets size={18} />
+              </div>
+            </div>
+            <p className="mt-2 font-display text-3xl font-extrabold text-slate-900">
+              {paramStats.ph.avg != null ? paramStats.ph.avg.toFixed(2) : '--'}
+            </p>
+            <p className="text-[11px] font-semibold text-slate-400 mt-0.5">Acidity / Alkalinity</p>
+          </div>
+
+          {paramStats.ph.spark.length > 1 && (
+            <div className="my-2">
+              <MiniSparkline values={paramStats.ph.spark} color="#10b981" width={110} height={32} />
+            </div>
+          )}
+
+          <div className="border-t border-slate-100 pt-2 flex items-center justify-between text-xs text-slate-500">
+            <span>Target: <strong>6.5-8.5</strong></span>
+            <span className="font-bold text-emerald-700">
+              {paramStats.ph.min != null ? `${paramStats.ph.min.toFixed(1)} - ${paramStats.ph.max?.toFixed(1)}` : ''}
+            </span>
+          </div>
+        </div>
+
+        {/* Water Clarity (Turbidity & TDS) KPI Tile */}
+        <div className="rounded-3xl border border-slate-200/90 bg-white p-5 shadow-sm flex flex-col justify-between transition hover:shadow-md">
+          <div>
+            <div className="flex items-center justify-between text-slate-400">
+              <span className="text-xs font-bold uppercase tracking-wider">Clarity & Solids</span>
+              <div className="rounded-xl bg-sky-50 p-2 text-sky-700">
+                <Waves size={18} />
+              </div>
+            </div>
+            <p className="mt-2 font-display text-2xl font-extrabold text-slate-900">
+              {paramStats.turbidity.avg != null ? `${paramStats.turbidity.avg.toFixed(1)} NTU` : '--'}
+            </p>
+            <p className="text-[11px] font-semibold text-slate-500 mt-0.5">
+              TDS: <strong>{paramStats.tds.avg != null ? `${Math.round(paramStats.tds.avg)} ppm` : '--'}</strong>
+            </p>
+          </div>
+
+          {paramStats.turbidity.spark.length > 1 && (
+            <div className="my-2">
+              <MiniSparkline values={paramStats.turbidity.spark} color="#0ea5e9" width={110} height={32} />
+            </div>
+          )}
+
+          <div className="border-t border-slate-100 pt-2 flex items-center justify-between text-xs text-slate-500">
+            <span>Target: <strong>&lt;30 NTU</strong></span>
+            <span className="font-bold text-sky-700">&lt;1000 ppm</span>
+          </div>
+        </div>
+
+        {/* Monitored Probes & LoRa Link KPI Tile */}
+        <div className="rounded-3xl border border-slate-200/90 bg-white p-5 shadow-sm flex flex-col justify-between transition hover:shadow-md">
+          <div>
+            <div className="flex items-center justify-between text-slate-400">
+              <span className="text-xs font-bold uppercase tracking-wider">Probe Network</span>
+              <div className="rounded-xl bg-emerald-50 p-2 text-emerald-700">
+                <Wifi size={18} />
+              </div>
+            </div>
+            <p className="mt-2 font-display text-3xl font-extrabold text-slate-900">{activeCount}</p>
+            <p className="text-[11px] font-semibold text-slate-400 mt-0.5">Active sensor nodes</p>
+          </div>
+
+          <div className="my-3 space-y-1.5 text-xs text-slate-600">
+            <div className="flex items-center justify-between">
+              <span>Avg Battery:</span>
+              <strong className="text-slate-800">{paramStats.battery.avg}%</strong>
+            </div>
+            <div className="flex items-center justify-between">
+              <span>Facilities:</span>
+              <strong className="text-slate-800">{nodes.length} registered</strong>
             </div>
           </div>
-          <p className="mt-3 text-xs font-medium text-slate-500">Continuous cloud sync buffer</p>
-        </div>
 
-        {/* Active Alerts */}
-        <div className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm">
-          <div className="flex items-start justify-between">
-            <div>
-              <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                Critical Anomalies
-              </p>
-              <p className="mt-2 font-display text-3xl font-bold text-slate-900">{criticalCount}</p>
-            </div>
-            <div
-              className={`rounded-xl p-2.5 ${
-                criticalCount > 0 ? 'bg-rose-50 text-rose-700' : 'bg-emerald-50 text-emerald-700'
-              }`}
+          <div className="border-t border-slate-100 pt-2 text-xs flex items-center justify-between">
+            <span className="text-emerald-700 font-bold flex items-center gap-1">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> LoRa Online
+            </span>
+            <button
+              onClick={() => setView('nodes')}
+              className="text-cyan-700 hover:text-cyan-900 font-bold"
             >
-              <AlertTriangle size={20} />
-            </div>
+              Manage &rarr;
+            </button>
           </div>
-          <p className="mt-3 text-xs font-medium text-slate-500">
-            {criticalCount === 0 ? 'All parameters within safety thresholds' : 'Attention recommended'}
-          </p>
-        </div>
-
-        {/* Average Battery / LoRa Health */}
-        <div className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm">
-          <div className="flex items-start justify-between">
-            <div>
-              <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                Fleet Probe Battery
-              </p>
-              <p className="mt-2 font-display text-3xl font-bold text-slate-900">{avgBattery}%</p>
-            </div>
-            <div className="rounded-xl bg-emerald-50 p-2.5 text-emerald-700">
-              <Wifi size={20} />
-            </div>
-          </div>
-          <p className="mt-3 text-xs font-medium text-slate-500">LoRa link health optimal</p>
         </div>
       </div>
 
-      {/* Live Latest Readings Grid Component (Core User Request!) */}
+      {/* Hero Live Telemetry Trends Studio (Primary User Request!) */}
+      <div className="rounded-3xl border border-slate-200/90 bg-white p-6 shadow-sm">
+        <WaterQualityChart
+          readings={readings}
+          nodes={nodes}
+          height={350}
+          defaultParam="temperature"
+          initialTimeRange="24h"
+          showControls={true}
+          title="Fleet Telemetry Trajectory Studio"
+          subtitle="Real-time multi-probe sensor trajectory with safety boundaries and interactive time scrubbing"
+        />
+      </div>
+
+      {/* Live Probe Monitor Grid Matrix */}
       <LiveLatestReadingsSection
         readings={readings}
         nodes={nodes}
         onInspectNode={() => setView('telemetry')}
       />
 
-      {/* Lower Dashboard Section: Alerts & Facility Overview */}
+      {/* Lower Dashboard Hub: Alerts Feed & Facility Directory */}
       <div className="grid gap-6 lg:grid-cols-[1.2fr_1fr]">
         {/* Recent Alerts Feed */}
-        <section className="rounded-2xl border border-slate-200/90 bg-white p-6 shadow-sm">
+        <section className="rounded-3xl border border-slate-200/90 bg-white p-6 shadow-sm">
           <div className="flex items-center justify-between border-b border-slate-100 pb-4">
             <div>
-              <h3 className="font-display text-lg font-bold text-slate-900">Recent Alert Events</h3>
-              <p className="text-xs text-slate-500">Exception deviations requiring operator inspection.</p>
+              <div className="flex items-center gap-2">
+                <span className="h-2 w-2 rounded-full bg-rose-500 animate-pulse" />
+                <h3 className="font-display text-lg font-bold text-slate-900">Recent Alert Incidents</h3>
+              </div>
+              <p className="text-xs text-slate-500">Threshold deviations requiring operator attention.</p>
             </div>
             <button
               onClick={() => setView('alerts')}
               className="flex items-center gap-1 text-xs font-bold text-cyan-700 hover:text-cyan-900"
             >
-              Alert Center <ChevronRight size={14} />
+              Alert Center ({alerts.length}) <ChevronRight size={14} />
             </button>
           </div>
 
           <div className="mt-5 space-y-3">
-            {alerts.slice(0, 4).map((alert) => {
+            {alerts.slice(0, 5).map((alert) => {
               const isCrit = alert.severity.toLowerCase() === 'critical'
               return (
                 <div
                   key={alert.id}
-                  className={`flex items-start justify-between rounded-xl p-3.5 text-xs ${
-                    isCrit ? 'bg-rose-50/60 text-rose-900' : 'bg-slate-50 text-slate-800'
+                  className={`flex items-start justify-between rounded-2xl p-4 text-xs transition ${
+                    isCrit ? 'bg-rose-50/70 text-rose-950 border border-rose-100' : 'bg-slate-50 text-slate-800'
                   }`}
                 >
-                  <div className="flex items-start gap-2.5">
+                  <div className="flex items-start gap-3">
                     <div className="mt-0.5">
                       {isCrit ? (
-                        <AlertOctagon size={16} className="text-rose-600" />
+                        <AlertOctagon size={18} className="text-rose-600" />
                       ) : (
-                        <AlertTriangle size={16} className="text-amber-600" />
+                        <AlertTriangle size={18} className="text-amber-600" />
                       )}
                     </div>
                     <div>
-                      <p className="font-bold">{alert.message}</p>
-                      <p className="mt-0.5 text-slate-500">
-                        Probe {alert.node_id} • {alert.parameter}
+                      <p className="font-bold text-sm">{alert.message}</p>
+                      <p className="mt-1 text-slate-500">
+                        Probe: <strong className="text-slate-700">{alert.node_id}</strong> • Parameter: <span className="uppercase font-semibold">{alert.parameter}</span>
                       </p>
                     </div>
                   </div>
@@ -674,35 +870,42 @@ function OverviewTab({
               )
             })}
             {!alerts.length && (
-              <p className="py-8 text-center text-xs text-slate-400">No alert incidents reported.</p>
+              <div className="py-10 text-center">
+                <CheckCircle2 size={32} className="mx-auto text-emerald-500 mb-2" />
+                <p className="text-sm font-bold text-slate-700">All Water Parameters Safe</p>
+                <p className="text-xs text-slate-400 mt-1">Zero alert deviations reported across all probes.</p>
+              </div>
             )}
           </div>
         </section>
 
-        {/* Facility Directory Snapshot */}
-        <section className="rounded-2xl border border-slate-200/90 bg-white p-6 shadow-sm">
+        {/* Connected Facilities Overview */}
+        <section className="rounded-3xl border border-slate-200/90 bg-white p-6 shadow-sm">
           <div className="flex items-center justify-between border-b border-slate-100 pb-4">
             <div>
-              <h3 className="font-display text-lg font-bold text-slate-900">Connected Facilities</h3>
-              <p className="text-xs text-slate-500">Master node gateways streaming telemetry.</p>
+              <div className="flex items-center gap-2">
+                <span className="h-2 w-2 rounded-full bg-cyan-500" />
+                <h3 className="font-display text-lg font-bold text-slate-900">Connected Facilities</h3>
+              </div>
+              <p className="text-xs text-slate-500">Authorized master gateways streaming water quality telemetry.</p>
             </div>
             <button
               onClick={() => setView('nodes')}
               className="flex items-center gap-1 text-xs font-bold text-cyan-700 hover:text-cyan-900"
             >
-              Manage <ChevronRight size={14} />
+              Registry <ChevronRight size={14} />
             </button>
           </div>
 
           <div className="mt-5 space-y-3">
-            {nodes.slice(0, 4).map((node) => (
+            {nodes.slice(0, 5).map((node) => (
               <div
                 key={node.id}
-                className="flex items-center justify-between rounded-xl border border-slate-100 p-3 text-xs hover:bg-slate-50 transition"
+                className="flex items-center justify-between rounded-2xl border border-slate-100 p-3.5 text-xs hover:bg-slate-50 transition"
               >
                 <div>
-                  <p className="font-bold text-slate-900">{node.display_name}</p>
-                  <p className="text-[11px] font-semibold text-cyan-700">{node.node_code}</p>
+                  <p className="font-bold text-slate-900 text-sm">{node.display_name}</p>
+                  <p className="text-[11px] font-semibold text-cyan-700 mt-0.5">{node.node_code}</p>
                 </div>
                 <div className="text-right">
                   <Tag color={node.status === 'active' ? 'emerald' : 'rose'}>{node.status}</Tag>
@@ -711,7 +914,7 @@ function OverviewTab({
               </div>
             ))}
             {!nodes.length && (
-              <p className="py-8 text-center text-xs text-slate-400">
+              <p className="py-10 text-center text-xs text-slate-400">
                 Single facility session connected.
               </p>
             )}

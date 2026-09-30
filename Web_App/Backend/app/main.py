@@ -473,6 +473,20 @@ def update_master_node(
         )
 
 
+@app.delete('/admin/master-nodes/{master_node_id}')
+def delete_master_node(
+    master_node_id: int,
+    _: dict[str, Any] = Depends(require_super_admin),
+) -> dict[str, str]:
+    with get_session() as session:
+        node = session.get(MasterNode, master_node_id)
+        if node is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Master node not found')
+        session.delete(node)
+        session.commit()
+    return {'message': 'Master node deleted successfully'}
+
+
 @app.get('/admin/readings/latest')
 def admin_readings_latest(
     _: dict[str, Any] = Depends(require_super_admin),
@@ -886,6 +900,38 @@ def get_node_configs(claims: dict[str, Any] = Depends(verify_token)) -> list[Nod
                     updated_at=row.updated_at,
                 )
             )
+        return results
+
+
+@app.get('/admin/nodes')
+def admin_get_all_nodes(
+    _: dict[str, Any] = Depends(require_super_admin),
+) -> list[dict[str, Any]]:
+    """Super admin: list all sensor nodes across all facilities with facility metadata"""
+    with get_session() as session:
+        master_nodes = {mn.id: mn for mn in session.exec(select(MasterNode)).all()}
+        rows = session.exec(select(NodeConfig).order_by(NodeConfig.node_id)).all()
+        results = []
+        for row in rows:
+            mn = master_nodes.get(row.master_node_id)
+            profile_val = row.custom_profile
+            if isinstance(profile_val, str) and profile_val.strip().startswith('{'):
+                try:
+                    profile_val = json.loads(profile_val)
+                except Exception:
+                    pass
+            results.append({
+                'id': row.id,
+                'master_node_id': row.master_node_id,
+                'master_node_code': mn.node_code if mn else None,
+                'master_node_name': mn.display_name if mn else None,
+                'node_id': row.node_id,
+                'name': row.name,
+                'location': row.location,
+                'pond_type': row.pond_type,
+                'custom_profile': profile_val,
+                'updated_at': row.updated_at,
+            })
         return results
 
 

@@ -28,11 +28,23 @@ import {
   ShieldCheck,
   Sparkles,
   Thermometer,
+  Trash2,
+  TrendingDown,
+  TrendingUp,
   Waves,
   Wifi,
   X
 } from 'lucide-react'
-import { Alert, api, DashboardStats, exportReadingsToCsv, Node, Reading } from './api'
+import {
+  Alert,
+  api,
+  DashboardStats,
+  deleteMasterNode,
+  exportReadingsToCsv,
+  Node,
+  Reading
+} from './api'
+import { MiniSparkline, WaterQualityChart } from './TelemetryChart'
 
 export const inputClass =
   'w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-800 placeholder-slate-400 outline-none transition focus:border-cyan-500 focus:ring-4 focus:ring-cyan-500/10 shadow-sm'
@@ -414,7 +426,7 @@ export function TelemetryView({
   const [search, setSearch] = useState('')
   const [selectedNode, setSelectedNode] = useState('all')
   const [selectedFacility, setSelectedFacility] = useState('all')
-  const [paramFilter, setParamFilter] = useState<'all' | 'temp' | 'ph' | 'turbidity' | 'tds'>('all')
+  const [healthFilter, setHealthFilter] = useState<'all' | 'Optimal' | 'Caution' | 'Critical'>('all')
   const [pageSize, setPageSize] = useState<number>(50)
   const [page, setPage] = useState<number>(1)
 
@@ -431,13 +443,17 @@ export function TelemetryView({
         String(r.master_node_id) !== selectedFacility
       )
         return false
+      if (healthFilter !== 'all') {
+        const h = getFishHealthStatus(r)
+        if (h.status !== healthFilter) return false
+      }
       if (search) {
-        const text = `${r.node_id} ${r.pond_type ?? ''} ${r.master_node_code ?? ''}`.toLowerCase()
+        const text = `${r.node_id} ${r.pond_type ?? ''} ${r.master_node_code ?? ''} ${r.master_node_name ?? ''}`.toLowerCase()
         if (!text.includes(search.toLowerCase())) return false
       }
       return true
     })
-  }, [readings, selectedNode, selectedFacility, search])
+  }, [readings, selectedNode, selectedFacility, healthFilter, search])
 
   const paginated = useMemo(() => {
     const start = (page - 1) * pageSize
@@ -446,7 +462,7 @@ export function TelemetryView({
 
   const totalPages = Math.ceil(filtered.length / pageSize) || 1
 
-  // Summary Metrics
+  // Summary Metrics & Compliance
   const stats = useMemo(() => {
     const temps = filtered.map((r) => r.temperature).filter((v): v is number => v != null)
     const phs = filtered.map((r) => r.ph).filter((v): v is number => v != null)
@@ -457,20 +473,57 @@ export function TelemetryView({
     const min = (arr: number[]) => (arr.length ? Math.min(...arr) : null)
     const max = (arr: number[]) => (arr.length ? Math.max(...arr) : null)
 
+    const tempCompliance = temps.length
+      ? Math.round((temps.filter((t) => t >= 26 && t <= 30).length / temps.length) * 100)
+      : 100
+    const phCompliance = phs.length
+      ? Math.round((phs.filter((p) => p >= 6.5 && p <= 8.5).length / phs.length) * 100)
+      : 100
+    const turbCompliance = turbidities.length
+      ? Math.round((turbidities.filter((tb) => tb <= 30).length / turbidities.length) * 100)
+      : 100
+    const tdsCompliance = tdss.length
+      ? Math.round((tdss.filter((td) => td <= 1000).length / tdss.length) * 100)
+      : 100
+
     return {
-      temp: { avg: avg(temps), min: min(temps), max: max(temps), count: temps.length },
-      ph: { avg: avg(phs), min: min(phs), max: max(phs), count: phs.length },
-      turbidity: { avg: avg(turbidities), min: min(turbidities), max: max(turbidities), count: turbidities.length },
-      tds: { avg: avg(tdss), min: min(tdss), max: max(tdss), count: tdss.length }
+      temp: {
+        avg: avg(temps),
+        min: min(temps),
+        max: max(temps),
+        compliance: tempCompliance,
+        spark: temps.slice(-20)
+      },
+      ph: {
+        avg: avg(phs),
+        min: min(phs),
+        max: max(phs),
+        compliance: phCompliance,
+        spark: phs.slice(-20)
+      },
+      turbidity: {
+        avg: avg(turbidities),
+        min: min(turbidities),
+        max: max(turbidities),
+        compliance: turbCompliance,
+        spark: turbidities.slice(-20)
+      },
+      tds: {
+        avg: avg(tdss),
+        min: min(tdss),
+        max: max(tdss),
+        compliance: tdsCompliance,
+        spark: tdss.slice(-20)
+      }
     }
   }, [filtered])
 
   return (
-    <div className="animate-rise space-y-6">
+    <div className="animate-rise space-y-7">
       <PageTitle
-        eyebrow="Data Warehouse"
-        title="Telemetry & Water Quality History"
-        description="Comprehensive historical logs and sensor intelligence across all connected IoT probes."
+        eyebrow="Telemetry Intelligence"
+        title="Water Quality Analytics & Chart Studio"
+        description="Interactive time-series telemetry scrubber with safe range boundaries, multi-probe comparison, and statistical compliance."
         action={
           <>
             <button
@@ -487,91 +540,173 @@ export function TelemetryView({
         }
       />
 
-      {/* Parameter Cards Bar */}
+      {/* Hero Interactive Chart Studio Card */}
+      <div className="rounded-3xl border border-slate-200/90 bg-white p-6 shadow-sm">
+        <WaterQualityChart
+          readings={readings}
+          nodes={nodes}
+          height={380}
+          showControls={true}
+          defaultParam="temperature"
+          initialTimeRange="24h"
+          title="Telemetry Trajectory & Safety Boundaries"
+          subtitle="Real-time multi-probe stream with safe zone envelopes and interactive crosshair inspection"
+        />
+      </div>
+
+      {/* Parameter Analytics & Compliance Grid */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {/* Temperature */}
-        <div className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm">
-          <div className="flex items-center justify-between text-slate-500">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
-              Water Temperature
-            </span>
-            <div className="rounded-xl bg-cyan-50 p-2 text-cyan-700">
-              <Thermometer size={18} />
+        {/* Temperature Card */}
+        <div className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm transition hover:shadow-md">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="rounded-xl bg-cyan-50 p-2 text-cyan-700">
+                <Thermometer size={18} />
+              </div>
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                Temperature
+              </span>
             </div>
+            <Tag color={stats.temp.compliance >= 90 ? 'emerald' : stats.temp.compliance >= 70 ? 'amber' : 'rose'}>
+              {stats.temp.compliance}% Safe
+            </Tag>
           </div>
-          <p className="mt-2 font-display text-3xl font-bold text-slate-900">
-            {stats.temp.avg != null ? `${stats.temp.avg.toFixed(1)}°C` : '--'}
-          </p>
-          <div className="mt-3 flex items-center justify-between text-xs text-slate-500 border-t border-slate-100 pt-2.5">
-            <span>Min: {stats.temp.min ?? '--'}°C</span>
-            <span>Max: {stats.temp.max ?? '--'}°C</span>
-            <span className="font-semibold text-emerald-600">Target: 26-30°C</span>
+
+          <div className="mt-4 flex items-end justify-between">
+            <div>
+              <p className="font-display text-3xl font-extrabold text-slate-900">
+                {stats.temp.avg != null ? `${stats.temp.avg.toFixed(1)}°C` : '--'}
+              </p>
+              <p className="text-[11px] font-semibold text-slate-400 mt-0.5">Average reading</p>
+            </div>
+            {stats.temp.spark.length > 1 && (
+              <div className="pb-1">
+                <MiniSparkline values={stats.temp.spark} color="#06b6d4" width={95} height={32} />
+              </div>
+            )}
+          </div>
+
+          <div className="mt-4 flex items-center justify-between text-xs text-slate-500 border-t border-slate-100 pt-2.5">
+            <span>Min: <strong>{stats.temp.min != null ? `${stats.temp.min.toFixed(1)}°C` : '--'}</strong></span>
+            <span>Max: <strong>{stats.temp.max != null ? `${stats.temp.max.toFixed(1)}°C` : '--'}</strong></span>
+            <span className="font-bold text-cyan-700">Safe: 26-30°C</span>
           </div>
         </div>
 
-        {/* pH */}
-        <div className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm">
-          <div className="flex items-center justify-between text-slate-500">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
-              pH Acidity / Alkalinity
-            </span>
-            <div className="rounded-xl bg-emerald-50 p-2 text-emerald-700">
-              <Droplets size={18} />
+        {/* pH Card */}
+        <div className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm transition hover:shadow-md">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="rounded-xl bg-emerald-50 p-2 text-emerald-700">
+                <Droplets size={18} />
+              </div>
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                pH Level
+              </span>
             </div>
+            <Tag color={stats.ph.compliance >= 90 ? 'emerald' : stats.ph.compliance >= 70 ? 'amber' : 'rose'}>
+              {stats.ph.compliance}% Safe
+            </Tag>
           </div>
-          <p className="mt-2 font-display text-3xl font-bold text-slate-900">
-            {stats.ph.avg != null ? stats.ph.avg.toFixed(2) : '--'}
-          </p>
-          <div className="mt-3 flex items-center justify-between text-xs text-slate-500 border-t border-slate-100 pt-2.5">
-            <span>Min: {stats.ph.min?.toFixed(1) ?? '--'}</span>
-            <span>Max: {stats.ph.max?.toFixed(1) ?? '--'}</span>
-            <span className="font-semibold text-emerald-600">Target: 6.5-8.5</span>
+
+          <div className="mt-4 flex items-end justify-between">
+            <div>
+              <p className="font-display text-3xl font-extrabold text-slate-900">
+                {stats.ph.avg != null ? stats.ph.avg.toFixed(2) : '--'}
+              </p>
+              <p className="text-[11px] font-semibold text-slate-400 mt-0.5">Average reading</p>
+            </div>
+            {stats.ph.spark.length > 1 && (
+              <div className="pb-1">
+                <MiniSparkline values={stats.ph.spark} color="#10b981" width={95} height={32} />
+              </div>
+            )}
+          </div>
+
+          <div className="mt-4 flex items-center justify-between text-xs text-slate-500 border-t border-slate-100 pt-2.5">
+            <span>Min: <strong>{stats.ph.min != null ? stats.ph.min.toFixed(2) : '--'}</strong></span>
+            <span>Max: <strong>{stats.ph.max != null ? stats.ph.max.toFixed(2) : '--'}</strong></span>
+            <span className="font-bold text-emerald-700">Safe: 6.5-8.5</span>
           </div>
         </div>
 
-        {/* Turbidity */}
-        <div className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm">
-          <div className="flex items-center justify-between text-slate-500">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
-              Turbidity (Clarity)
-            </span>
-            <div className="rounded-xl bg-sky-50 p-2 text-sky-700">
-              <Waves size={18} />
+        {/* Turbidity Card */}
+        <div className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm transition hover:shadow-md">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="rounded-xl bg-sky-50 p-2 text-sky-700">
+                <Waves size={18} />
+              </div>
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                Turbidity
+              </span>
             </div>
+            <Tag color={stats.turbidity.compliance >= 90 ? 'emerald' : stats.turbidity.compliance >= 70 ? 'amber' : 'rose'}>
+              {stats.turbidity.compliance}% Safe
+            </Tag>
           </div>
-          <p className="mt-2 font-display text-3xl font-bold text-slate-900">
-            {stats.turbidity.avg != null ? `${stats.turbidity.avg.toFixed(1)} NTU` : '--'}
-          </p>
-          <div className="mt-3 flex items-center justify-between text-xs text-slate-500 border-t border-slate-100 pt-2.5">
-            <span>Min: {stats.turbidity.min ?? '--'} NTU</span>
-            <span>Max: {stats.turbidity.max ?? '--'} NTU</span>
-            <span className="font-semibold text-sky-600">Target: &lt;30 NTU</span>
+
+          <div className="mt-4 flex items-end justify-between">
+            <div>
+              <p className="font-display text-3xl font-extrabold text-slate-900">
+                {stats.turbidity.avg != null ? `${stats.turbidity.avg.toFixed(1)} NTU` : '--'}
+              </p>
+              <p className="text-[11px] font-semibold text-slate-400 mt-0.5">Average reading</p>
+            </div>
+            {stats.turbidity.spark.length > 1 && (
+              <div className="pb-1">
+                <MiniSparkline values={stats.turbidity.spark} color="#0ea5e9" width={95} height={32} />
+              </div>
+            )}
+          </div>
+
+          <div className="mt-4 flex items-center justify-between text-xs text-slate-500 border-t border-slate-100 pt-2.5">
+            <span>Min: <strong>{stats.turbidity.min != null ? `${stats.turbidity.min.toFixed(1)} NTU` : '--'}</strong></span>
+            <span>Max: <strong>{stats.turbidity.max != null ? `${stats.turbidity.max.toFixed(1)} NTU` : '--'}</strong></span>
+            <span className="font-bold text-sky-700">Safe: &lt;30 NTU</span>
           </div>
         </div>
 
-        {/* TDS */}
-        <div className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm">
-          <div className="flex items-center justify-between text-slate-500">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
-              Total Dissolved Solids
-            </span>
-            <div className="rounded-xl bg-amber-50 p-2 text-amber-700">
-              <Activity size={18} />
+        {/* TDS Card */}
+        <div className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm transition hover:shadow-md">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="rounded-xl bg-amber-50 p-2 text-amber-700">
+                <Activity size={18} />
+              </div>
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                Total Solids (TDS)
+              </span>
             </div>
+            <Tag color={stats.tds.compliance >= 90 ? 'emerald' : stats.tds.compliance >= 70 ? 'amber' : 'rose'}>
+              {stats.tds.compliance}% Safe
+            </Tag>
           </div>
-          <p className="mt-2 font-display text-3xl font-bold text-slate-900">
-            {stats.tds.avg != null ? `${Math.round(stats.tds.avg)} ppm` : '--'}
-          </p>
-          <div className="mt-3 flex items-center justify-between text-xs text-slate-500 border-t border-slate-100 pt-2.5">
-            <span>Min: {stats.tds.min ?? '--'} ppm</span>
-            <span>Max: {stats.tds.max ?? '--'} ppm</span>
-            <span className="font-semibold text-amber-600">Target: &lt;1000 ppm</span>
+
+          <div className="mt-4 flex items-end justify-between">
+            <div>
+              <p className="font-display text-3xl font-extrabold text-slate-900">
+                {stats.tds.avg != null ? `${Math.round(stats.tds.avg)} ppm` : '--'}
+              </p>
+              <p className="text-[11px] font-semibold text-slate-400 mt-0.5">Average reading</p>
+            </div>
+            {stats.tds.spark.length > 1 && (
+              <div className="pb-1">
+                <MiniSparkline values={stats.tds.spark} color="#f59e0b" width={95} height={32} />
+              </div>
+            )}
+          </div>
+
+          <div className="mt-4 flex items-center justify-between text-xs text-slate-500 border-t border-slate-100 pt-2.5">
+            <span>Min: <strong>{stats.tds.min != null ? `${Math.round(stats.tds.min)}` : '--'}</strong></span>
+            <span>Max: <strong>{stats.tds.max != null ? `${Math.round(stats.tds.max)}` : '--'}</strong></span>
+            <span className="font-bold text-amber-700">Safe: &lt;1000 ppm</span>
           </div>
         </div>
       </div>
 
-      {/* Main Table Card */}
-      <div className="rounded-2xl border border-slate-200/90 bg-white shadow-sm overflow-hidden">
+      {/* Main Filterable Telemetry Log Table */}
+      <div className="rounded-3xl border border-slate-200/90 bg-white shadow-sm overflow-hidden">
         {/* Filter Controls Header */}
         <div className="flex flex-col gap-3 p-5 border-b border-slate-100 bg-slate-50/50 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex flex-wrap items-center gap-2.5">
@@ -585,7 +720,7 @@ export function TelemetryView({
                   setPage(1)
                 }}
                 className={`${inputClass} pl-9 text-xs`}
-                placeholder="Search node, facility..."
+                placeholder="Search node, facility, pond..."
               />
             </div>
 
@@ -598,10 +733,10 @@ export function TelemetryView({
               }}
               className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 outline-none hover:bg-slate-50"
             >
-              <option value="all">All Sensor Nodes ({distinctNodes.length})</option>
+              <option value="all">All Sensor Probes ({distinctNodes.length})</option>
               {distinctNodes.map((n) => (
                 <option key={n} value={n}>
-                  Node: {n}
+                  Probe: {n}
                 </option>
               ))}
             </select>
@@ -624,69 +759,123 @@ export function TelemetryView({
                 ))}
               </select>
             )}
+
+            {/* Health Status Filter */}
+            <select
+              value={healthFilter}
+              onChange={(e) => {
+                setHealthFilter(e.target.value as any)
+                setPage(1)
+              }}
+              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 outline-none hover:bg-slate-50"
+            >
+              <option value="all">All Health Conditions</option>
+              <option value="Optimal">Optimal Only</option>
+              <option value="Caution">Caution / Marginal</option>
+              <option value="Critical">Critical Exception</option>
+            </select>
           </div>
 
-          <div className="text-xs font-semibold text-slate-500">
-            Showing <strong className="text-slate-800">{filtered.length}</strong> records
+          <div className="flex items-center gap-3 text-xs font-semibold text-slate-500">
+            <span>
+              Showing <strong className="text-slate-800">{filtered.length}</strong> records
+            </span>
+            <select
+              value={pageSize}
+              onChange={(e) => {
+                setPageSize(Number(e.target.value))
+                setPage(1)
+              }}
+              className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-bold text-slate-700 outline-none"
+            >
+              <option value={25}>25 / page</option>
+              <option value={50}>50 / page</option>
+              <option value={100}>100 / page</option>
+            </select>
           </div>
         </div>
 
         {/* Table Content */}
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[860px] text-left text-sm">
+          <table className="w-full min-w-[920px] text-left text-sm">
             <thead>
               <tr className="border-b border-slate-100 bg-slate-50/80 text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                <th className="px-5 py-3">Timestamp / Node</th>
-                <th className="px-5 py-3">Facility / Pond</th>
-                <th className="px-5 py-3">Temperature</th>
-                <th className="px-5 py-3">pH Value</th>
-                <th className="px-5 py-3">Turbidity</th>
-                <th className="px-5 py-3">TDS</th>
-                <th className="px-5 py-3">Health Status</th>
-                <th className="px-5 py-3">Link / Signal</th>
+                <th className="px-5 py-3.5">Timestamp / Probe</th>
+                <th className="px-5 py-3.5">Facility / Pond</th>
+                <th className="px-5 py-3.5">Temperature</th>
+                <th className="px-5 py-3.5">pH Level</th>
+                <th className="px-5 py-3.5">Turbidity</th>
+                <th className="px-5 py-3.5">TDS Solids</th>
+                <th className="px-5 py-3.5">Ecosystem Status</th>
+                <th className="px-5 py-3.5">LoRa Link</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {paginated.map((r, idx) => {
                 const health = getFishHealthStatus(r)
+                const isTempExtreme = r.temperature != null && (r.temperature < 20 || r.temperature > 34)
+                const isPhExtreme = r.ph != null && (r.ph < 6.0 || r.ph > 9.0)
+                const isTurbElevated = r.turbidity != null && r.turbidity > 50
+
                 return (
-                  <tr key={`${r.node_id}-${r.timestamp}-${idx}`} className="transition hover:bg-sky-50/30">
+                  <tr key={`${r.node_id}-${r.timestamp}-${idx}`} className="transition hover:bg-sky-50/40">
                     <td className="px-5 py-3.5">
-                      <p className="font-display font-bold text-slate-900">{r.node_id}</p>
-                      <p className="mt-0.5 text-xs text-slate-400" title={r.timestamp}>
+                      <div className="flex items-center gap-2">
+                        <span className="flex h-2 w-2 rounded-full bg-cyan-500" />
+                        <span className="font-display font-bold text-slate-900">{r.node_id}</span>
+                      </div>
+                      <p className="mt-0.5 text-xs text-slate-400 pl-4" title={r.timestamp}>
                         {formatDate(r.timestamp)}
                       </p>
                     </td>
 
                     <td className="px-5 py-3.5">
-                      <p className="font-semibold text-slate-700">
+                      <p className="font-semibold text-slate-800">
                         {r.master_node_name || r.master_node_code || 'Main Facility'}
                       </p>
-                      <span className="mt-0.5 inline-block text-xs font-bold uppercase text-cyan-700">
+                      <span className="mt-0.5 inline-block text-[11px] font-bold uppercase tracking-wider text-cyan-700 bg-cyan-50 px-2 py-0.5 rounded-md">
                         {r.pond_type || 'Tilapia'}
                       </span>
                     </td>
 
                     <td className="px-5 py-3.5">
-                      <span className="font-display font-bold text-slate-800">
+                      <span
+                        className={`inline-block font-display font-bold px-2 py-0.5 rounded-md text-xs ${
+                          isTempExtreme
+                            ? 'bg-rose-100 text-rose-800'
+                            : 'bg-cyan-50 text-cyan-900 font-extrabold'
+                        }`}
+                      >
                         {r.temperature != null ? `${r.temperature}°C` : '--'}
                       </span>
                     </td>
 
                     <td className="px-5 py-3.5">
-                      <span className="font-display font-bold text-slate-800">
+                      <span
+                        className={`inline-block font-display font-bold px-2 py-0.5 rounded-md text-xs ${
+                          isPhExtreme
+                            ? 'bg-rose-100 text-rose-800'
+                            : 'bg-emerald-50 text-emerald-900 font-extrabold'
+                        }`}
+                      >
                         {r.ph != null ? r.ph.toFixed(2) : '--'}
                       </span>
                     </td>
 
                     <td className="px-5 py-3.5">
-                      <span className="font-semibold text-slate-700">
+                      <span
+                        className={`inline-block font-semibold px-2 py-0.5 rounded-md text-xs ${
+                          isTurbElevated
+                            ? 'bg-amber-100 text-amber-800'
+                            : 'text-slate-700'
+                        }`}
+                      >
                         {r.turbidity != null ? `${r.turbidity} NTU` : '--'}
                       </span>
                     </td>
 
                     <td className="px-5 py-3.5">
-                      <span className="font-semibold text-slate-700">
+                      <span className="font-semibold text-slate-700 text-xs">
                         {r.tds != null ? `${r.tds} ppm` : '--'}
                       </span>
                     </td>
@@ -696,17 +885,19 @@ export function TelemetryView({
                     </td>
 
                     <td className="px-5 py-3.5 text-xs text-slate-500">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2.5">
                         {r.battery_pct != null && (
                           <span
-                            className={`font-semibold ${
+                            className={`font-bold ${
                               r.battery_pct < 25 ? 'text-rose-600' : 'text-slate-600'
                             }`}
                           >
                             {r.battery_pct}% bat
                           </span>
                         )}
-                        {r.rssi != null && <span className="text-slate-400">{r.rssi} dBm</span>}
+                        {r.rssi != null && (
+                          <span className="text-slate-400 font-mono text-[11px]">{r.rssi} dBm</span>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -714,8 +905,8 @@ export function TelemetryView({
               })}
               {!filtered.length && (
                 <tr>
-                  <td colSpan={8} className="px-5 py-12 text-center text-sm text-slate-500">
-                    No telemetry records match your current filter.
+                  <td colSpan={8} className="px-5 py-14 text-center text-sm text-slate-500">
+                    No telemetry records match your current filter selection.
                   </td>
                 </tr>
               )}
@@ -727,20 +918,21 @@ export function TelemetryView({
         {totalPages > 1 && (
           <div className="flex items-center justify-between border-t border-slate-100 p-4 text-xs font-semibold text-slate-600">
             <div>
-              Page {page} of {totalPages}
+              Page <strong className="text-slate-800">{page}</strong> of{' '}
+              <strong className="text-slate-800">{totalPages}</strong>
             </div>
             <div className="flex items-center gap-2">
               <button
                 disabled={page <= 1}
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
-                className="rounded-lg border border-slate-200 px-3 py-1.5 font-bold hover:bg-slate-50 disabled:opacity-40"
+                className="rounded-xl border border-slate-200 px-3.5 py-1.5 font-bold hover:bg-slate-50 disabled:opacity-40"
               >
                 Previous
               </button>
               <button
                 disabled={page >= totalPages}
                 onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                className="rounded-lg border border-slate-200 px-3 py-1.5 font-bold hover:bg-slate-50 disabled:opacity-40"
+                className="rounded-xl border border-slate-200 px-3.5 py-1.5 font-bold hover:bg-slate-50 disabled:opacity-40"
               >
                 Next
               </button>
@@ -786,6 +978,9 @@ export function NodesView({
   const [query, setQuery] = useState('')
   const [editing, setEditing] = useState<Node | null>(null)
   const [creating, setCreating] = useState(false)
+  const [deletingNode, setDeletingNode] = useState<Node | null>(null)
+  const [deleteBusy, setDeleteBusy] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
 
   const filtered = nodes.filter((n) =>
     `${n.node_code} ${n.display_name} ${n.site_location ?? ''} ${n.contact_name ?? ''}`
@@ -793,24 +988,85 @@ export function NodesView({
       .includes(query.toLowerCase())
   )
 
+  const activeCount = nodes.filter((n) => n.status === 'active').length
+
+  const handleDelete = async () => {
+    if (!deletingNode) return
+    setDeleteBusy(true)
+    setDeleteError('')
+    try {
+      await deleteMasterNode(deletingNode.id)
+      await reload()
+      setDeletingNode(null)
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : 'Failed to delete facility')
+    } finally {
+      setDeleteBusy(false)
+    }
+  }
+
   return (
     <div className="animate-rise space-y-6">
       <PageTitle
         eyebrow="Fleet Topology"
-        title="Facility & Master Node Registry"
-        description="Manage provisioned aquaculture facility accounts, contact ownership, and cloud access credentials."
+        title="Facility & Gateway Registry"
+        description="Provision, manage, and monitor authorized facility master node accounts and cloud stream credentials."
         action={
           <button onClick={() => setCreating(true)} className={buttonClass}>
-            <Plus size={16} /> Provision Facility
+            <Plus size={16} /> Provision New Facility
           </button>
         }
       />
 
-      <div className="rounded-2xl border border-slate-200/90 bg-white shadow-sm overflow-hidden">
+      {/* Facilities Overview Cards */}
+      <div className="grid gap-4 sm:grid-cols-3">
+        <div className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm">
+          <div className="flex items-center justify-between text-slate-500">
+            <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
+              Registered Facilities
+            </span>
+            <div className="rounded-xl bg-cyan-50 p-2 text-cyan-700">
+              <Server size={18} />
+            </div>
+          </div>
+          <p className="mt-2 font-display text-3xl font-bold text-slate-900">{nodes.length}</p>
+          <p className="mt-1 text-xs text-slate-500">Configured gateway accounts</p>
+        </div>
+
+        <div className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm">
+          <div className="flex items-center justify-between text-slate-500">
+            <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
+              Active Stream Gateways
+            </span>
+            <div className="rounded-xl bg-emerald-50 p-2 text-emerald-700">
+              <CheckCircle2 size={18} />
+            </div>
+          </div>
+          <p className="mt-2 font-display text-3xl font-bold text-emerald-700">{activeCount}</p>
+          <p className="mt-1 text-xs text-slate-500">Currently authorized to ingest telemetry</p>
+        </div>
+
+        <div className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm">
+          <div className="flex items-center justify-between text-slate-500">
+            <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
+              Administrative Accounts
+            </span>
+            <div className="rounded-xl bg-purple-50 p-2 text-purple-700">
+              <ShieldCheck size={18} />
+            </div>
+          </div>
+          <p className="mt-2 font-display text-3xl font-bold text-purple-900">
+            {nodes.filter((n) => n.role === 'super_admin').length}
+          </p>
+          <p className="mt-1 text-xs text-slate-500">Super Admin role privileges</p>
+        </div>
+      </div>
+
+      <div className="rounded-3xl border border-slate-200/90 bg-white shadow-sm overflow-hidden">
         <div className="flex flex-col gap-3 p-5 border-b border-slate-100 bg-slate-50/50 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h3 className="font-display text-base font-bold text-slate-900">
-              Registered Facilities ({nodes.length})
+              Facilities Directory ({nodes.length})
             </h3>
             <p className="text-xs text-slate-500">Active gateways authorized to stream water quality telemetry.</p>
           </div>
@@ -826,15 +1082,15 @@ export function NodesView({
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[780px] text-left text-sm">
+          <table className="w-full min-w-[800px] text-left text-sm">
             <thead>
               <tr className="border-b border-slate-100 bg-slate-50/80 text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                <th className="px-5 py-3">Facility / Code</th>
-                <th className="px-5 py-3">Contact Person</th>
-                <th className="px-5 py-3">Location & Environment</th>
-                <th className="px-5 py-3">Role</th>
-                <th className="px-5 py-3">Status</th>
-                <th className="px-5 py-3 text-right">Actions</th>
+                <th className="px-5 py-3.5">Facility / Code</th>
+                <th className="px-5 py-3.5">Contact Person</th>
+                <th className="px-5 py-3.5">Location & Environment</th>
+                <th className="px-5 py-3.5">Access Role</th>
+                <th className="px-5 py-3.5">Status</th>
+                <th className="px-5 py-3.5 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -878,18 +1134,28 @@ export function NodesView({
                   </td>
 
                   <td className="px-5 py-4 text-right">
-                    <button
-                      onClick={() => setEditing(node)}
-                      className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-700 shadow-sm transition hover:bg-slate-50 hover:text-cyan-700"
-                    >
-                      <Edit3 size={13} /> Edit
-                    </button>
+                    <div className="flex items-center justify-end gap-1.5">
+                      <button
+                        onClick={() => setEditing(node)}
+                        className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-700 shadow-sm transition hover:bg-slate-50 hover:text-cyan-700"
+                        title="Edit facility parameters"
+                      >
+                        <Edit3 size={13} /> Edit
+                      </button>
+                      <button
+                        onClick={() => setDeletingNode(node)}
+                        className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-bold text-rose-600 shadow-sm transition hover:bg-rose-50 hover:border-rose-300"
+                        title="Delete facility from registry"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
               {!filtered.length && (
                 <tr>
-                  <td colSpan={6} className="px-5 py-10 text-center text-sm text-slate-500">
+                  <td colSpan={6} className="px-5 py-12 text-center text-sm text-slate-500">
                     No matching facilities found.
                   </td>
                 </tr>
@@ -898,6 +1164,52 @@ export function NodesView({
           </table>
         </div>
       </div>
+
+      {/* Delete Confirmation Modal */}
+      {deletingNode && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#071b2d]/60 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
+            <div className="flex items-center gap-3">
+              <div className="rounded-2xl bg-rose-100 p-3 text-rose-600">
+                <Trash2 size={24} />
+              </div>
+              <div>
+                <h3 className="font-display text-lg font-bold text-slate-900">Decommission Facility?</h3>
+                <p className="text-xs text-slate-500">This action cannot be undone.</p>
+              </div>
+            </div>
+
+            <p className="mt-4 text-sm text-slate-600 leading-relaxed">
+              Are you sure you want to delete <strong className="text-slate-900">{deletingNode.display_name}</strong> (<code>{deletingNode.node_code}</code>)?
+              This will remove the facility master node and revoke its telemetry ingestion access.
+            </p>
+
+            {deleteError && (
+              <p className="mt-3 rounded-xl bg-rose-50 p-3 text-xs font-semibold text-rose-700">
+                {deleteError}
+              </p>
+            )}
+
+            <div className="mt-6 flex justify-end gap-2.5">
+              <button
+                type="button"
+                disabled={deleteBusy}
+                onClick={() => setDeletingNode(null)}
+                className="rounded-xl px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100"
+              >
+                Cancel
+              </button>
+              <button
+                disabled={deleteBusy}
+                onClick={() => void handleDelete()}
+                className="inline-flex items-center gap-2 rounded-xl bg-rose-600 px-4 py-2 text-xs font-bold text-white shadow-md shadow-rose-600/25 transition hover:bg-rose-500 disabled:opacity-50"
+              >
+                {deleteBusy ? 'Deleting...' : 'Confirm Deletion'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {(creating || editing) && (
         <NodeModal
