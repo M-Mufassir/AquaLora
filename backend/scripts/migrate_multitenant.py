@@ -1,4 +1,4 @@
-n, We have seen some d#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 AquaLoRa Multi-Tenant Data Migration Script
 Runs idempotent migration to support MasterNode tenancy:

@@ -1,4 +1,4 @@
-const rawApiUrl = (import.meta.env.VITE_API_URL || 'http://localhost:8000').trim().replace(/\/+$/, '')
+const rawApiUrl = (import.meta.env.VITE_API_URL || 'https://aqualora-backend-brdufwffeddhd6a8.centralindia-01.azurewebsites.net').trim().replace(/\/+$/, '')
 export const API_URL = rawApiUrl
 
 export type Node = {
