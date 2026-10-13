@@ -67,6 +67,22 @@ jobs:
           tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_AD8D7EF7F99249ACBB227EA03179B607 }}
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_D69945A5C3834CC4BD153B1ADBE17A5B }}
 
+      - name: Ensure Web App is running
+        run: |
+          RESOURCE_GROUP=$(az webapp list --query "[?name=='aqualora-backend'].resourceGroup | [0]" -o tsv)
+          if [ -z "$RESOURCE_GROUP" ]; then
+            echo "Unable to resolve resource group for aqualora-backend."
+            exit 1
+          fi
+
+          APP_STATE=$(az webapp show --name aqualora-backend --resource-group "$RESOURCE_GROUP" --query "state" -o tsv)
+          if [ "$APP_STATE" != "Running" ]; then
+            echo "Web App state is '$APP_STATE'. Starting Web App before deployment."
+            az webapp start --name aqualora-backend --resource-group "$RESOURCE_GROUP"
+          else
+            echo "Web App is already running."
+          fi
+ 
       - name: 'Deploy to Azure Web App'
         uses: azure/webapps-deploy@v3
         id: deploy-to-webapp
