@@ -11,18 +11,25 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session, SQLModel, create_engine
 
-# Use SQLite for testing
-os.environ['DATABASE_URL'] = 'sqlite:///./test_aqualora.db'
+from sqlalchemy.pool import StaticPool
+
+# Use in-memory SQLite for testing
+os.environ['DATABASE_URL'] = 'sqlite://'
 os.environ['ADMIN_PASSWORD'] = 'TestAdmin123'
 os.environ['JWT_SECRET'] = 'test-secret-key-123'
 
+from app import database
 from app.auth import create_token, hash_password
-
 from app.config import get_settings
 from app.database import Alert, MasterNode, Reading, get_session, init_db
 from app.main import app, seed_default_master_node
 
-test_engine = create_engine('sqlite:///./test_aqualora.db', connect_args={'check_same_thread': False})
+test_engine = create_engine(
+    'sqlite://',
+    connect_args={'check_same_thread': False},
+    poolclass=StaticPool,
+)
+database.engine = test_engine
 
 
 @pytest.fixture(autouse=True)
@@ -37,11 +44,6 @@ def setup_db():
     seed_default_master_node()
     yield
     app.dependency_overrides.clear()
-    if os.path.exists('./test_aqualora.db'):
-        try:
-            os.remove('./test_aqualora.db')
-        except Exception:
-            pass
 
 
 def test_directory_listing_public():
