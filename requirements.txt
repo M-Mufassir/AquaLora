@@ -1,0 +1,2 @@
+# Azure App Service Python root dependencies
+-r backend/requirements.txt
