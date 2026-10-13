@@ -63,10 +63,26 @@ jobs:
       - name: Login to Azure
         uses: azure/login@v2
         with:
-          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_DCCA7B26CFBC42159D3B1B050658C103 }}
-          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_A34A5B3A93C4446C9419FC29101C5C9E }}
-          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_80B51ACE2B4C41EEAE3AEB6CC6252651 }}
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_D122BACA1B964EF0B1F74529DB0A07B2 }}
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_AD8D7EF7F99249ACBB227EA03179B607 }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_D69945A5C3834CC4BD153B1ADBE17A5B }}
 
+      - name: Ensure Web App is running
+        run: |
+          RESOURCE_GROUP=$(az webapp list --query "[?name=='aqualora-backend'].resourceGroup | [0]" -o tsv)
+          if [ -z "$RESOURCE_GROUP" ]; then
+            echo "Unable to resolve resource group for aqualora-backend."
+            exit 1
+          fi
+
+          APP_STATE=$(az webapp show --name aqualora-backend --resource-group "$RESOURCE_GROUP" --query "state" -o tsv)
+          if [ "$APP_STATE" != "Running" ]; then
+            echo "Web App state is '$APP_STATE'. Starting Web App before deployment."
+            az webapp start --name aqualora-backend --resource-group "$RESOURCE_GROUP"
+          else
+            echo "Web App is already running."
+          fi
+ 
       - name: 'Deploy to Azure Web App'
         uses: azure/webapps-deploy@v3
         id: deploy-to-webapp
