@@ -1,4 +1,5 @@
-export const API_URL = import.meta.env.VITE_API_URL ?? '/api'
+const rawApiUrl = (import.meta.env.VITE_API_URL || 'http://localhost:8000').trim().replace(/\/+$/, '')
+export const API_URL = rawApiUrl
 
 export type Node = {
   id: number
@@ -114,7 +115,8 @@ export const session = {
 }
 
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const response = await fetch(`${API_URL}${path}`, {
+  const cleanPath = path.startsWith('/') ? path : `/${path}`
+  const response = await fetch(`${API_URL}${cleanPath}`, {
     ...options,
     headers: {
       'Content-Type': 'application/json',

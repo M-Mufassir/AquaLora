@@ -1,0 +1,51 @@
+name: AquaLoRa CD - Deploy Backend to Azure
+
+# Trigger CD when commits are pushed to the main branch affecting the backend
+on:
+  push:
+    branches:
+      - main
+      - azure_host
+    paths:
+      - 'backend/**'
+      - 'Dockerfile'
+      - '.github/workflows/deploy-backend-azure.yml'
+  workflow_dispatch: # Allows manual trigger from GitHub Actions UI
+
+jobs:
+  deploy-to-azure:
+    name: 🚀 Deploy Backend to Azure App Service
+    runs-on: ubuntu-latest
+    # Optional: Wait for CI tests to pass before deploying
+    # needs: [backend-test]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run quick unit test check before deploy
+        run: |
+          pip install --upgrade pip
+          pip install -r backend/requirements.txt
+          pip install pytest httpx
+          pytest backend/tests/test_multitenant_auth.py
+
+      # Azure App Service Deployment
+      # Note: To enable this deployment:
+      # 1. Download your Publish Profile from Azure Portal (Web App overview page -> "Get publish profile").
+      # 2. In GitHub repository: Settings -> Secrets and variables -> Actions -> New repository secret.
+      # 3. Name: AZURE_WEBAPP_PUBLISH_PROFILE, Value: paste the XML content.
+      # 4. Set AZURE_WEBAPP_NAME to your Azure Web App name (e.g. aqualora-api).
+      - name: Deploy to Azure Web App
+        if: env.AZURE_WEBAPP_PUBLISH_PROFILE != ''
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ vars.AZURE_WEBAPP_NAME || 'aqualora-api' }}
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          package: .
+        env:
+          AZURE_WEBAPP_PUBLISH_PROFILE: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}

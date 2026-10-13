@@ -1,5 +1,6 @@
 import { safeStorage } from 'electron'
 import { getSettingOptional, setSetting, deleteSetting } from './db'
+import { DEFAULT_CLOUD_API_URL } from './config'
 
 export interface CloudSessionData {
   token: string
@@ -62,12 +63,9 @@ export function clearCloudSession(): void {
 export function resolveCloudUrl(path: string, customBaseUrl?: string): string {
   let base = (customBaseUrl || getSettingOptional('cloud_sync_url') || '').trim()
   if (!base) {
-    base = 'https://aqualora.up.railway.app/api'
+    base = DEFAULT_CLOUD_API_URL
   }
   base = base.replace(/\/+$/, '')
-  if (base.includes('aqualora.up.railway.app') && !base.endsWith('/api')) {
-    base = `${base}/api`
-  }
   const cleanPath = path.startsWith('/') ? path.slice(1) : path
   return `${base}/${cleanPath}`
 }

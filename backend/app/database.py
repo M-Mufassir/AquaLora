@@ -1,11 +1,24 @@
 from __future__ import annotations
 
+from typing import Any
 from sqlmodel import Field, Session, SQLModel, create_engine, select
 
 from .config import get_settings
 
 settings = get_settings()
-engine = create_engine(settings.database_url, echo=False)
+
+db_url = settings.database_url
+if db_url.startswith('postgres://'):
+    db_url = db_url.replace('postgres://', 'postgresql://', 1)
+
+engine_kwargs: dict[str, Any] = {'echo': False}
+if 'sqlite' in db_url:
+    engine_kwargs['connect_args'] = {'check_same_thread': False}
+else:
+    engine_kwargs['pool_pre_ping'] = True
+    engine_kwargs['pool_recycle'] = 300
+
+engine = create_engine(db_url, **engine_kwargs)
 
 
 class MasterNode(SQLModel, table=True):

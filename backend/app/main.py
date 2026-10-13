@@ -14,16 +14,29 @@ from .config import get_settings
 from .database import Alert, MasterNode, NodeConfig, Reading, get_session, init_db
 
 
+from starlette.requests import Request
+
 app = FastAPI(title='AquaLoRa Multi-Tenant Cloud API')
 settings = get_settings()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=['*'],
+    allow_origin_regex=r'^https?://.*',
     allow_credentials=True,
     allow_methods=['*'],
     allow_headers=['*'],
 )
+
+
+@app.middleware('http')
+async def rewrite_api_prefix(request: Request, call_next):
+    """Allow all endpoints to be accessed either with or without `/api` prefix."""
+    path = request.scope.get('path', '')
+    if path.startswith('/api/'):
+        request.scope['path'] = path[4:]
+    elif path == '/api':
+        request.scope['path'] = '/'
+    return await call_next(request)
 
 
 class LoginRequest(BaseModel):
@@ -179,10 +192,17 @@ def seed_default_master_node() -> None:
             session.commit()
 
 
-@app.on_event('startup')
-def startup_event() -> None:
+from contextlib import asynccontextmanager
+
+
+@asynccontextmanager
+async def lifespan(application: FastAPI):
     init_db()
     seed_default_master_node()
+    yield
+
+
+app.router.lifespan_context = lifespan
 
 
 @app.get('/health')

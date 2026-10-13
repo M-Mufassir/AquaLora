@@ -64,6 +64,7 @@ import {
   resolveCloudUrl,
   type CloudSessionData
 } from './cloudSession'
+import { DEFAULT_CLOUD_API_URL } from './config'
 import { MasterNodeClient } from './masterNodeClient'
 import { DecisionEngine } from './decisionEngine'
 import { scanNetworks, connectToNetwork, getCurrentConnection } from './wifiManager'
@@ -132,7 +133,7 @@ async function getCloudAuthToken(): Promise<string | null> {
  * Tests the cloud endpoint /health or uses DNS lookup fallback.
  */
 async function checkInternetConnectivity(): Promise<boolean> {
-  const baseUrl = getSettingOptional('cloud_sync_url')?.trim() || 'https://aqualora.up.railway.app/api'
+  const baseUrl = getSettingOptional('cloud_sync_url')?.trim() || DEFAULT_CLOUD_API_URL
   try {
     const healthUrl = resolveCloudUrl('/health', baseUrl)
     const controller = new AbortController()
@@ -169,7 +170,7 @@ async function performCloudSync(isManual = false): Promise<CloudSyncStatus> {
   }
 
   isSyncInProgress = true
-  const baseUrl = getSettingOptional('cloud_sync_url')?.trim() || 'https://aqualora.up.railway.app/api'
+  const baseUrl = getSettingOptional('cloud_sync_url')?.trim() || DEFAULT_CLOUD_API_URL
   const activeCode = getActiveMasterNodeCode() || getSettingOptional('master_node_code')
 
   try {
@@ -578,7 +579,7 @@ app.whenReady().then(() => {
       const cloudUrl =
         payload.cloudUrl?.trim() ||
         getSettingOptional('cloud_sync_url')?.trim() ||
-        'https://aqualora.up.railway.app/api'
+        DEFAULT_CLOUD_API_URL
 
       // 1. Check if this Master Node was previously connected in our local SQLite database
       const existingMasterNode = getMasterNodeByCode(nodeCode)

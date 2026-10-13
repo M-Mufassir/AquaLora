@@ -180,3 +180,7 @@ ios/DerivedData/
 # Local environment files for mobile apps
 mobile_application/.env
 mobile_application/.env.*
+
+# Local test databases & test caches
+*.db
+.pytest_cache/

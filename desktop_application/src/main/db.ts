@@ -2,6 +2,7 @@ import { app } from 'electron'
 import { join } from 'path'
 import Database from 'better-sqlite3'
 import bcrypt from 'bcryptjs'
+import { DEFAULT_CLOUD_API_URL } from './config'
 import {
   DEFAULT_POND_PROFILES,
   type Reading,
@@ -391,7 +392,7 @@ export function getCloudSyncStatus(): CloudSyncStatus {
   const pendingCount = pendingOutbox + pendingAlertOutbox
   const lastSuccess = getSettingOptional('cloud_sync_last_success_at')
   const lastError = getSettingOptional('cloud_sync_last_error')
-  const cloudUrl = getSettingOptional('cloud_sync_url') || 'https://aqualora.up.railway.app/api'
+  const cloudUrl = getSettingOptional('cloud_sync_url') || DEFAULT_CLOUD_API_URL
 
   return {
     enabled: true,

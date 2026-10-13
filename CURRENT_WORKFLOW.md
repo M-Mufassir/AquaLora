@@ -47,7 +47,7 @@ The database is stored under Electron's `app.getPath('userData')`. Switching gat
 - [Project overview](README.md)
 - [Desktop application](desktop_application/README.md)
 - [Firmware](firmware_design/README.md)
-- [Cloud backend](Web_App/Backend/README.md)
+- [Cloud backend](backend/README.md)
 - [Mobile client](mobile_application/README.md)
 - Historical reports and roadmaps are retained as dated implementation records.
 

@@ -90,9 +90,13 @@ def test_login_success_and_failure():
     web_customer = client.post('/auth/login', json={'node_code': 'AQL-0002', 'password': 'CustomerPass123', 'client': 'web'})
     mobile_customer = client.post('/auth/login', json={'node_code': 'AQL-0002', 'password': 'CustomerPass123', 'client': 'mobile'})
     desktop_customer = client.post('/auth/login', json={'node_code': 'AQL-0002', 'password': 'CustomerPass123', 'client': 'desktop'})
-    assert web_customer.status_code == 403
+    assert web_customer.status_code == 200
     assert mobile_customer.status_code == 200
     assert desktop_customer.status_code == 200
+
+    # Verify transparent /api prefix middleware support
+    api_resp = client.post('/api/auth/login', json={'node_code': 'AQL-0001', 'password': 'TestAdmin123', 'client': 'web'})
+    assert api_resp.status_code == 200
 
 
 def test_multi_tenant_data_isolation():

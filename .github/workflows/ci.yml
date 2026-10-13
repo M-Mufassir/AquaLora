@@ -1,0 +1,93 @@
+name: AquaLoRa CI Pipeline
+
+# Trigger this workflow on every push to any branch and on pull requests to main
+on:
+  push:
+    branches: [ "**" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  # ─── 1. Backend Test Job ───────────────────────────────────────────────────
+  backend-test:
+    name: 🐍 Backend (Python 3.12 & Pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+          pip install pytest httpx
+
+      - name: Run Backend Pytest Suite
+        run: |
+          pytest backend/tests/test_multitenant_auth.py -v
+
+  # ─── 2. Frontend Build Job ─────────────────────────────────────────────────
+  frontend-build:
+    name: ⚛️ Frontend Web App (Vite & React)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build production bundle
+        working-directory: frontend
+        run: npm run build
+
+  # ─── 3. Desktop Application Check ──────────────────────────────────────────
+  desktop-typecheck:
+    name: 🖥️ Desktop App (Electron & TypeScript)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: desktop_application/package-lock.json
+
+      - name: Install dependencies
+        working-directory: desktop_application
+        run: npm ci
+
+      - name: Run TypeScript typecheck
+        working-directory: desktop_application
+        run: npm run typecheck
+
+  # ─── 4. Docker Container Verification ──────────────────────────────────────
+  docker-validation:
+    name: 🐳 Docker Container Build Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: actions/setup-buildx-action@v3
+
+      - name: Build Backend Docker Image
+        run: |
+          docker build -t aqualora-backend:ci-test .
