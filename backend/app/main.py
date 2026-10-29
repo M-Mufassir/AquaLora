@@ -8,10 +8,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import json
 from sqlmodel import Session, select
+import urllib.request
 
 from .auth import create_token, hash_password, require_super_admin, verify_password, verify_token
 from .config import get_settings
-from .database import Alert, MasterNode, NodeConfig, Reading, get_session, init_db
+from .database import Alert, DeviceToken, MasterNode, NodeConfig, Reading, get_session, init_db
 
 
 from starlette.requests import Request
@@ -169,12 +170,52 @@ class NodeConfigUpdateRequest(BaseModel):
     custom_profile: dict[str, Any] | str | None = None
 
 
+class RegisterDeviceRequest(BaseModel):
+    token: str
+    platform: str = 'android'
+    device_name: str | None = None
+
+
+def send_push_notifications(
+    tokens: list[str],
+    title: str,
+    body: str,
+    data: dict[str, Any] | None = None,
+) -> None:
+    if not tokens:
+        return
+    unique_tokens = list(set(tokens))
+    messages = [
+        {
+            'to': token,
+            'sound': 'default',
+            'title': title,
+            'body': body,
+            'data': data or {},
+            'priority': 'high',
+            'channelId': 'aqualora-alerts',
+        }
+        for token in unique_tokens
+    ]
+    try:
+        req = urllib.request.Request(
+            'https://exp.host/--/api/v2/push/send',
+            data=json.dumps(messages).encode('utf-8'),
+            headers={'Content-Type': 'application/json', 'Accept': 'application/json'},
+            method='POST',
+        )
+        with urllib.request.urlopen(req, timeout=5):
+            pass
+    except Exception as exc:
+        print(f'Failed to dispatch push notifications: {exc}')
+
+
 
 def seed_default_master_node() -> None:
     with get_session() as session:
         existing = session.exec(select(MasterNode)).first()
+        now_iso = datetime.now(timezone.utc).isoformat()
         if existing is None:
-            now_iso = datetime.now(timezone.utc).isoformat()
             default_node = MasterNode(
                 node_code='AQL-0001',
                 display_name='Default AquaLoRa Master Node',
@@ -189,6 +230,25 @@ def seed_default_master_node() -> None:
                 updated_at=now_iso,
             )
             session.add(default_node)
+            session.commit()
+
+        # Seed dedicated simulation/test master node if missing
+        test_node = session.exec(select(MasterNode).where(MasterNode.node_code == 'AQL-TEST')).first()
+        if test_node is None:
+            test_master = MasterNode(
+                node_code='AQL-TEST',
+                display_name='Test Master Node (Simulation)',
+                password_hash=hash_password('testmaster123'),
+                contact_name='Test Facility',
+                site_location='Simulation Lab',
+                pond_type='tilapia',
+                installed_at=now_iso,
+                role='customer',
+                status='active',
+                created_at=now_iso,
+                updated_at=now_iso,
+            )
+            session.add(test_master)
             session.commit()
 
 
@@ -242,8 +302,18 @@ def login(payload: LoginRequest) -> LoginResponse:
         node = session.exec(statement).first()
 
         if node is None:
-            # Check if identifier matches default super admin config and seed if missing
-            if identifier.lower() == settings.admin_username.lower():
+            # Check if identifier is an alias for the primary master node or matches admin username
+            if identifier.lower() in ('master-node', 'master_node', 'aql-001'):
+                node = session.exec(
+                    select(MasterNode).where(
+                        (MasterNode.node_code == 'AQL-0001') | (MasterNode.node_code == 'AQL-001')
+                    )
+                ).first()
+            elif identifier.lower() in ('aql-test', 'test-master', 'test_master', 'test-master-node'):
+                node = session.exec(
+                    select(MasterNode).where(MasterNode.node_code == 'AQL-TEST')
+                ).first()
+            elif identifier.lower() == settings.admin_username.lower():
                 node = session.exec(select(MasterNode).where(MasterNode.role == 'super_admin')).first()
 
         if node is None or node.status != 'active':
@@ -753,7 +823,7 @@ def latest_readings(claims: dict[str, Any] = Depends(verify_token)) -> list[dict
 def history_readings(
     start: str | None = Query(default=None),
     end: str | None = Query(default=None),
-    limit: int = Query(default=100, le=500),
+    limit: int = Query(default=100, le=2000),
     claims: dict[str, Any] = Depends(verify_token),
 ) -> list[dict[str, Any]]:
     master_node_id = claims['master_node_id']
@@ -820,7 +890,72 @@ def sync_alerts(
 
         session.commit()
 
+        # Check if there are warning/critical alerts to push to mobile devices
+        critical_or_warnings = [a for a in payload.alerts if a.severity.lower() in ('warning', 'critical')]
+        if critical_or_warnings:
+            device_tokens = session.exec(
+                select(DeviceToken.token).where(DeviceToken.master_node_id == master_node_id)
+            ).all()
+            if device_tokens:
+                for al in critical_or_warnings:
+                    icon_prefix = '🚨 CRITICAL' if al.severity.lower() == 'critical' else '⚠️ WARNING'
+                    send_push_notifications(
+                        tokens=list(device_tokens),
+                        title=f"{icon_prefix}: Node {al.node_id} {al.parameter.capitalize()}",
+                        body=al.message,
+                        data={
+                            'node_id': al.node_id,
+                            'parameter': al.parameter,
+                            'severity': al.severity,
+                            'timestamp': al.timestamp,
+                        },
+                    )
+
     return {'received': len(payload.alerts), 'stored': saved}
+
+
+@app.post('/devices/register')
+def register_device(
+    payload: RegisterDeviceRequest,
+    claims: dict[str, Any] = Depends(verify_token),
+) -> dict[str, str]:
+    master_node_id = claims['master_node_id']
+    with get_session() as session:
+        statement = select(DeviceToken).where(DeviceToken.token == payload.token)
+        existing = session.exec(statement).first()
+        now_iso = datetime.now(timezone.utc).isoformat()
+        if existing:
+            existing.master_node_id = master_node_id
+            existing.platform = payload.platform
+            existing.device_name = payload.device_name
+            existing.updated_at = now_iso
+            session.add(existing)
+        else:
+            new_dev = DeviceToken(
+                master_node_id=master_node_id,
+                token=payload.token,
+                platform=payload.platform,
+                device_name=payload.device_name,
+                created_at=now_iso,
+                updated_at=now_iso,
+            )
+            session.add(new_dev)
+        session.commit()
+    return {'status': 'registered'}
+
+
+@app.post('/devices/unregister')
+def unregister_device(
+    payload: RegisterDeviceRequest,
+    claims: dict[str, Any] = Depends(verify_token),
+) -> dict[str, str]:
+    with get_session() as session:
+        statement = select(DeviceToken).where(DeviceToken.token == payload.token)
+        existing = session.exec(statement).first()
+        if existing:
+            session.delete(existing)
+            session.commit()
+    return {'status': 'unregistered'}
 
 
 @app.get('/alerts/latest')

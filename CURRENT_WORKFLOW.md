@@ -5,12 +5,12 @@ This is the source of truth for the workflow implemented in the repository. Olde
 ## System flow
 
 ```text
-Slave sensors -> LoRa -> Master Node -> Wi-Fi/WebSocket -> Desktop application
-                                      -> local SQLite record of truth
-                                      -> optional cloud sync/history import
+Slave sensors -> LoRa -> Master Node -> Wi-Fi/HTTPS POST -> Azure FastAPI Cloud Backend -> Mobile App
+                                      -> Wi-Fi/WebSocket  -> Desktop application (Local SQLite)
+                                                          -> Catches up missing cloud history
 ```
 
-The desktop application is offline-first. Live readings are stored locally before cloud synchronization is attempted.
+The Master Node simultaneously broadcasts readings to the local Desktop application (over WebSocket) and uploads them directly to the Azure Cloud Backend (over HTTPS). This ensures mobile clients receive live telemetry even when the desktop application is turned off. When the desktop application reconnects, it automatically pulls and reconciles any missing historical readings from the cloud backend.
 
 ## Desktop startup
 

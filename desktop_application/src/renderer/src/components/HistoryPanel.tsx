@@ -22,9 +22,22 @@ function rangeToIso(preset: RangePreset): { startIso: string; endIso: string } {
   return { startIso: new Date(Date.now() - RANGE_MS[preset]).toISOString(), endIso }
 }
 
-function formatTick(iso: string): string {
+function formatTick(iso: string, preset: RangePreset): string {
   const d = new Date(iso)
-  return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`
+  if (isNaN(d.getTime())) return ''
+  const hh = d.getHours().toString().padStart(2, '0')
+  const mm = d.getMinutes().toString().padStart(2, '0')
+  const ss = d.getSeconds().toString().padStart(2, '0')
+
+  if (preset === '1h') {
+    return `${hh}:${mm}:${ss}`
+  }
+  if (preset === '24h') {
+    return `${hh}:${mm}`
+  }
+  const month = (d.getMonth() + 1).toString().padStart(2, '0')
+  const day = d.getDate().toString().padStart(2, '0')
+  return `${day}/${month} ${hh}:${mm}`
 }
 
 interface ChartRowProps {
@@ -32,19 +45,28 @@ interface ChartRowProps {
   data: StoredReading[]
   dataKey: keyof StoredReading
   color: string
+  preset: RangePreset
 }
 
-function ChartRow({ title, data, dataKey, color }: ChartRowProps): React.JSX.Element {
+function ChartRow({ title, data, dataKey, color, preset }: ChartRowProps): React.JSX.Element {
   return (
     <div className="chart-row">
       <span className="chart-title">{title}</span>
       <ResponsiveContainer width="100%" height={140}>
         <LineChart data={data} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="var(--ev-c-gray-3)" />
-          <XAxis dataKey="timestamp" tickFormatter={formatTick} stroke="var(--ev-c-text-2)" fontSize={11} />
+          <XAxis
+            dataKey="timestamp"
+            tickFormatter={(iso) => formatTick(iso, preset)}
+            stroke="var(--ev-c-text-2)"
+            fontSize={11}
+          />
           <YAxis stroke="var(--ev-c-text-2)" fontSize={11} width={40} />
           <Tooltip
-            labelFormatter={(iso) => new Date(iso as string).toLocaleString()}
+            labelFormatter={(iso) => {
+              const d = new Date(iso as string)
+              return isNaN(d.getTime()) ? String(iso) : d.toLocaleString()
+            }}
             contentStyle={{
               backgroundColor: 'var(--color-surface)',
               border: '1px solid var(--color-border)',
@@ -63,10 +85,38 @@ function HistoryPanel({ nodeId }: HistoryPanelProps): React.JSX.Element {
   const [preset, setPreset] = useState<RangePreset>('1h')
   const [readings, setReadings] = useState<StoredReading[]>([])
   const [exportMessage, setExportMessage] = useState<string | null>(null)
+  const [isSyncingCloud, setIsSyncingCloud] = useState(false)
+
+  const reloadData = (): void => {
+    const { startIso, endIso } = rangeToIso(preset)
+    window.api.getReadingsInRange(nodeId, startIso, endIso).then((rows) => {
+      // Sort ascending by timestamp for correct graph direction
+      const sorted = [...rows].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+      setReadings(sorted)
+    })
+  }
 
   useEffect(() => {
-    const { startIso, endIso } = rangeToIso(preset)
-    window.api.getReadingsInRange(nodeId, startIso, endIso).then(setReadings)
+    reloadData()
+
+    // 1. Live stream new incoming readings into chart
+    const unsubReading = window.api.onReading((reading) => {
+      if (reading.node_id === nodeId) {
+        reloadData()
+      }
+    })
+
+    // 2. Reload when background cloud sync brings in historical data
+    const unsubSync = window.api.onSyncStatus((status) => {
+      if (status.syncPhase === 'synced' || status.syncPhase === 'idle') {
+        reloadData()
+      }
+    })
+
+    return () => {
+      unsubReading()
+      unsubSync()
+    }
   }, [nodeId, preset])
 
   async function handleExport(): Promise<void> {
@@ -75,6 +125,25 @@ function HistoryPanel({ nodeId }: HistoryPanelProps): React.JSX.Element {
     setExportMessage(
       result.canceled ? null : `Exported ${result.count} readings to ${result.filePath}`
     )
+  }
+
+  async function handleCloudSync(): Promise<void> {
+    setIsSyncingCloud(true)
+    setExportMessage('Syncing missing readings from cloud backend...')
+    try {
+      const status = await window.api.syncCloudReadings()
+      reloadData()
+      const dlCount = status.downloadedCount ?? 0
+      setExportMessage(
+        dlCount > 0
+          ? `Successfully synced ${dlCount} new readings from cloud!`
+          : 'Cloud sync complete — local history is already up to date.'
+      )
+    } catch (err: any) {
+      setExportMessage(`Cloud sync warning: ${err.message || String(err)}`)
+    } finally {
+      setIsSyncingCloud(false)
+    }
   }
 
   return (
@@ -89,6 +158,14 @@ function HistoryPanel({ nodeId }: HistoryPanelProps): React.JSX.Element {
             {p === 'all' ? 'All' : `Last ${p}`}
           </button>
         ))}
+        <button
+          className="range-btn sync-btn"
+          onClick={handleCloudSync}
+          disabled={isSyncingCloud}
+          title="Download older/missing readings from the cloud backend"
+        >
+          {isSyncingCloud ? 'Syncing...' : 'Sync Cloud'}
+        </button>
         <button className="range-btn export-btn" onClick={handleExport} disabled={readings.length === 0}>
           Export CSV
         </button>
@@ -105,15 +182,29 @@ function HistoryPanel({ nodeId }: HistoryPanelProps): React.JSX.Element {
             data={readings}
             dataKey="temperature"
             color="var(--cat-temperature)"
+            preset={preset}
           />
           <ChartRow
             title="Turbidity (NTU)"
             data={readings}
             dataKey="turbidity"
             color="var(--cat-turbidity)"
+            preset={preset}
           />
-          <ChartRow title="TDS (ppm)" data={readings} dataKey="tds" color="var(--cat-tds)" />
-          <ChartRow title="pH" data={readings} dataKey="ph" color="#8b5cf6" />
+          <ChartRow
+            title="TDS (ppm)"
+            data={readings}
+            dataKey="tds"
+            color="var(--cat-tds)"
+            preset={preset}
+          />
+          <ChartRow
+            title="pH"
+            data={readings}
+            dataKey="ph"
+            color="#8b5cf6"
+            preset={preset}
+          />
         </>
       )}
     </div>

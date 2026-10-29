@@ -9,12 +9,15 @@ import {
   TouchableOpacity,
   RefreshControl,
   Alert,
+  LayoutChangeEvent,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LineChart, lineDataItem } from 'react-native-gifted-charts';
 import { apiService } from '../services/apiService';
 import { Reading } from '../shared/types';
 import { colors, borderRadius, spacing, typography, shadows } from '../theme';
 import { SkeletonLoader } from '../components';
+import { saveCache, getCache, CACHE_KEYS } from '../services/cacheService';
 
 type MetricType = 'temperature' | 'turbidity' | 'tds' | 'ph';
 type PeriodType = '24h' | '7d' | '30d';
@@ -27,16 +30,15 @@ interface MetricConfig {
   safeMin: number;
   safeMax: number;
   color: string;
+  precision: number;
 }
 
 const METRICS: MetricConfig[] = [
-  { key: 'temperature', label: 'Temperature', unit: '°C', icon: '🌡️', safeMin: 18, safeMax: 32, color: '#1E90FF' },
-  { key: 'turbidity', label: 'Turbidity', unit: 'NTU', icon: '💧', safeMin: 0, safeMax: 5, color: '#0EA5E9' },
-  { key: 'tds', label: 'TDS', unit: 'ppm', icon: '🧪', safeMin: 200, safeMax: 800, color: '#8B5CF6' },
-  { key: 'ph', label: 'pH Level', unit: 'pH', icon: '⚖️', safeMin: 6.5, safeMax: 8.5, color: '#10B981' },
+  { key: 'temperature', label: 'Temperature', unit: '°C', icon: '🌡️', safeMin: 22, safeMax: 30, color: '#0284C7', precision: 1 },
+  { key: 'turbidity', label: 'Turbidity', unit: 'NTU', icon: '💧', safeMin: 0, safeMax: 5, color: '#0EA5E9', precision: 2 },
+  { key: 'tds', label: 'TDS', unit: 'ppm', icon: '🧪', safeMin: 300, safeMax: 600, color: '#8B5CF6', precision: 0 },
+  { key: 'ph', label: 'pH Level', unit: 'pH', icon: '⚖️', safeMin: 6.5, safeMax: 8.5, color: '#10B981', precision: 1 },
 ];
-
-import { saveCache, getCache, CACHE_KEYS } from '../services/cacheService';
 
 export const HistoryScreen = () => {
   const insets = useSafeAreaInsets();
@@ -46,18 +48,27 @@ export const HistoryScreen = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [isOfflineMode, setIsOfflineMode] = useState(false);
+  const [cardWidth, setCardWidth] = useState<number>(320);
+
+  const activeMetricConfig = METRICS.find(m => m.key === selectedMetric)!;
 
   const fetchHistory = useCallback(async (isRefresh = false) => {
     if (!isRefresh) setLoading(true);
     try {
       const now = new Date();
-      const rangeMs = selectedPeriod === '24h' ? 24 * 60 * 60 * 1000 : selectedPeriod === '7d' ? 7 * 24 * 60 * 60 * 1000 : 30 * 24 * 60 * 60 * 1000;
+      const rangeMs = selectedPeriod === '24h'
+        ? 24 * 60 * 60 * 1000
+        : selectedPeriod === '7d'
+          ? 7 * 24 * 60 * 60 * 1000
+          : 30 * 24 * 60 * 60 * 1000;
       const start = new Date(now.getTime() - rangeMs).toISOString();
+
       const data = await apiService.get<Reading[]>('/readings/history', {
         start,
         end: now.toISOString(),
-        limit: 200,
+        limit: selectedPeriod === '24h' ? 50 : selectedPeriod === '7d' ? 100 : 200,
       });
+
       const readingsArray = Array.isArray(data) ? data : [data];
       const sorted = [...readingsArray].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
       setReadings(sorted);
@@ -87,38 +98,58 @@ export const HistoryScreen = () => {
     await fetchHistory(true);
   };
 
-  const activeMetricConfig = METRICS.find(m => m.key === selectedMetric)!;
+  const handleCardLayout = (e: LayoutChangeEvent) => {
+    const w = e.nativeEvent.layout.width;
+    if (w > 0) setCardWidth(w);
+  };
 
-  const getTrendDataPoints = () => {
+  // Downsample or pick points for responsive charting
+  const getChartDataPoints = (): lineDataItem[] => {
     if (!readings.length) return [];
 
-    const limit = selectedPeriod === '24h' ? 8 : selectedPeriod === '7d' ? 7 : 12;
-    const displayData = readings.slice(-limit);
-    return displayData.map((reading) => {
+    // Limit points to avoid crowding the chart
+    const maxPoints = selectedPeriod === '24h' ? 12 : selectedPeriod === '7d' ? 14 : 20;
+    const step = Math.max(1, Math.floor(readings.length / maxPoints));
+    const sample = readings.filter((_, idx) => idx % step === 0).slice(-maxPoints);
+
+    return sample.map((reading, idx) => {
       const date = new Date(reading.timestamp);
-      const label = selectedPeriod === '24h'
+      const val = Number(reading[selectedMetric] ?? 0);
+      const timeStr = selectedPeriod === '24h'
         ? date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        : selectedPeriod === '7d'
-          ? date.toLocaleDateString([], { month: 'short', day: 'numeric' })
-          : `W${Math.ceil((date.getDate() || 1) / 7)}`;
+        : date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+
+      const showLabel = idx === 0 || idx === Math.floor(sample.length / 2) || idx === sample.length - 1;
 
       return {
-        label,
-        value: Number(reading[selectedMetric] ?? 0),
+        value: val,
+        label: showLabel ? timeStr : '',
+        labelTextStyle: {
+          color: colors.textMuted,
+          fontSize: 10,
+          fontWeight: '500',
+        },
+        dataPointColor: activeMetricConfig.color,
+        dataPointRadius: 4,
       };
     });
   };
 
-  const trendPoints = getTrendDataPoints();
-  const values = trendPoints.map(p => p.value);
-  const maxVal = Math.max(...values, activeMetricConfig.safeMax * 1.1);
-  const minVal = Math.min(...values, activeMetricConfig.safeMin * 0.8);
-  const avgVal = values.reduce((a, b) => a + b, 0) / (values.length || 1);
+  const chartPoints = getChartDataPoints();
+  const values = readings.map(r => Number(r[selectedMetric] ?? 0));
+  const hasValues = values.length > 0;
+  const avgVal = hasValues ? values.reduce((a, b) => a + b, 0) / values.length : 0;
+  const minVal = hasValues ? Math.min(...values) : 0;
+  const maxVal = hasValues ? Math.max(...values) : 0;
+
+  const calculatedSpacing = chartPoints.length > 1
+    ? Math.max(26, (cardWidth - 80) / (chartPoints.length - 1))
+    : 40;
 
   const handleExport = () => {
     Alert.alert(
       'Export Telemetry Data',
-      `Telemetry report for ${activeMetricConfig.label} (${selectedPeriod}) has been prepared for download.`,
+      `Telemetry report for ${activeMetricConfig.label} (${selectedPeriod}) with ${readings.length} data points has been prepared.`,
       [{ text: 'OK' }]
     );
   };
@@ -127,8 +158,12 @@ export const HistoryScreen = () => {
     <View style={[styles.safeArea, { paddingTop: insets.top }]}>
       {/* Screen Title Header */}
       <View style={styles.header}>
-        <Text style={styles.title}>Historical Telemetry</Text>
-        <Text style={styles.subtitle}>Trends & Analytics</Text>
+        <View>
+          <Text style={styles.title}>Historical Telemetry</Text>
+          <Text style={styles.subtitle}>
+            {isOfflineMode ? '⚡ Offline Cached View' : 'Multi-Day Trends & Cloud Analytics'}
+          </Text>
+        </View>
       </View>
 
       <ScrollView
@@ -137,37 +172,42 @@ export const HistoryScreen = () => {
       >
         {/* Metric Selector Tabs */}
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.metricTabs}>
-          {METRICS.map(m => (
-            <TouchableOpacity
-              key={m.key}
-              style={[
-                styles.metricTab,
-                selectedMetric === m.key && { backgroundColor: m.color, borderColor: m.color },
-              ]}
-              onPress={() => setSelectedMetric(m.key)}
-            >
-              <Text style={styles.metricIcon}>{m.icon}</Text>
-              <Text
+          {METRICS.map(m => {
+            const isActive = selectedMetric === m.key;
+            return (
+              <TouchableOpacity
+                key={m.key}
                 style={[
-                  styles.metricTabText,
-                  selectedMetric === m.key && styles.metricTabTextActive,
+                  styles.metricTab,
+                  isActive && { backgroundColor: m.color, borderColor: m.color },
                 ]}
+                onPress={() => setSelectedMetric(m.key)}
+                activeOpacity={0.7}
               >
-                {m.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
+                <Text style={styles.metricIcon}>{m.icon}</Text>
+                <Text
+                  style={[
+                    styles.metricTabText,
+                    isActive && styles.metricTabTextActive,
+                  ]}
+                >
+                  {m.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
         </ScrollView>
 
         {/* Period Filter Buttons */}
         <View style={styles.periodFilterRow}>
-          <Text style={styles.periodLabel}>Timeframe:</Text>
+          <Text style={styles.periodLabel}>Timeframe Filter</Text>
           <View style={styles.periodGroup}>
             {(['24h', '7d', '30d'] as PeriodType[]).map(p => (
               <TouchableOpacity
                 key={p}
                 style={[styles.periodBtn, selectedPeriod === p && styles.periodBtnActive]}
                 onPress={() => setSelectedPeriod(p)}
+                activeOpacity={0.7}
               >
                 <Text style={[styles.periodBtnText, selectedPeriod === p && styles.periodBtnTextActive]}>
                   {p.toUpperCase()}
@@ -178,51 +218,81 @@ export const HistoryScreen = () => {
         </View>
 
         {loading ? (
-          <SkeletonLoader height={220} style={{ borderRadius: borderRadius.md }} />
+          <SkeletonLoader height={240} style={{ borderRadius: borderRadius.md }} />
         ) : (
           <>
-            {/* Visual Trend Bar Chart Card */}
-            <View style={[styles.card, shadows.medium]}>
+            {/* Visual Trend Chart Card */}
+            <View style={[styles.card, shadows.medium]} onLayout={handleCardLayout}>
               <View style={styles.chartHeader}>
                 <View>
-                  <Text style={styles.chartTitle}>{activeMetricConfig.label} Trend</Text>
+                  <Text style={styles.chartTitle}>{activeMetricConfig.label} Trendline</Text>
                   <Text style={styles.chartSub}>
-                    Safe Range: {activeMetricConfig.safeMin} - {activeMetricConfig.safeMax} {activeMetricConfig.unit}
+                    Safe Range: {activeMetricConfig.safeMin} – {activeMetricConfig.safeMax} {activeMetricConfig.unit}
                   </Text>
                 </View>
-                <Text style={[styles.currentValueBadge, { color: activeMetricConfig.color }]}>
-                  {avgVal.toFixed(1)} {activeMetricConfig.unit}
-                </Text>
+                <View style={styles.currentBadge}>
+                  <Text style={styles.currentBadgeLabel}>Avg</Text>
+                  <Text style={[styles.currentValueBadge, { color: activeMetricConfig.color }]}>
+                    {avgVal.toFixed(activeMetricConfig.precision)} {activeMetricConfig.unit}
+                  </Text>
+                </View>
               </View>
 
-              {/* Visual Bars Container */}
-              <View style={styles.barsContainer}>
-                {trendPoints.map((pt, idx) => {
-                  const normalizedHeightPercent = Math.min(
-                    100,
-                    Math.max(15, ((pt.value - minVal) / (maxVal - minVal || 1)) * 100)
-                  );
-                  const isSafe = pt.value >= activeMetricConfig.safeMin && pt.value <= activeMetricConfig.safeMax;
-
-                  return (
-                    <View key={idx} style={styles.barColumn}>
-                      <Text style={styles.barValText}>{pt.value.toFixed(1)}</Text>
-                      <View style={styles.barTrack}>
-                        <View
-                          style={[
-                            styles.barFill,
-                            {
-                              height: `${normalizedHeightPercent}%`,
-                              backgroundColor: isSafe ? activeMetricConfig.color : colors.warning,
-                            },
-                          ]}
-                        />
-                      </View>
-                      <Text style={styles.barLabel}>{pt.label}</Text>
-                    </View>
-                  );
-                })}
-              </View>
+              {chartPoints.length === 0 ? (
+                <View style={styles.emptyContainer}>
+                  <Text style={styles.emptyText}>No historical records available for {selectedPeriod}.</Text>
+                </View>
+              ) : (
+                <View style={styles.chartWrapper}>
+                  <LineChart
+                    data={chartPoints}
+                    height={180}
+                    spacing={calculatedSpacing}
+                    initialSpacing={14}
+                    endSpacing={14}
+                    color={activeMetricConfig.color}
+                    thickness={3}
+                    curved
+                    areaChart
+                    startFillColor={activeMetricConfig.color}
+                    endFillColor={`${activeMetricConfig.color}08`}
+                    startOpacity={0.38}
+                    endOpacity={0.03}
+                    dataPointsColor={activeMetricConfig.color}
+                    dataPointsRadius={4}
+                    noOfSections={4}
+                    rulesType="solid"
+                    rulesColor={colors.border}
+                    yAxisColor="transparent"
+                    xAxisColor={colors.border}
+                    yAxisTextStyle={styles.axisText}
+                    xAxisLabelTextStyle={styles.axisText}
+                    yAxisLabelWidth={38}
+                    isAnimated
+                    animationDuration={600}
+                    pointerConfig={{
+                      pointerStripHeight: 160,
+                      pointerStripColor: activeMetricConfig.color,
+                      pointerStripWidth: 1.5,
+                      pointerColor: activeMetricConfig.color,
+                      radius: 5,
+                      pointerLabelWidth: 85,
+                      pointerLabelHeight: 36,
+                      autoAdjustPointerLabelPosition: true,
+                      pointerLabelComponent: (items: any) => {
+                        const item = items[0];
+                        return (
+                          <View style={styles.pointerTooltip}>
+                            <Text style={styles.pointerTooltipVal}>
+                              {Number(item?.value || 0).toFixed(activeMetricConfig.precision)} {activeMetricConfig.unit}
+                            </Text>
+                          </View>
+                        );
+                      },
+                    }}
+                  />
+                </View>
+              )}
             </View>
 
             {/* Statistics Breakdown Card */}
@@ -231,23 +301,34 @@ export const HistoryScreen = () => {
               <View style={styles.statsGrid}>
                 <View style={styles.statBox}>
                   <Text style={styles.statLabel}>Average</Text>
-                  <Text style={styles.statValue}>{avgVal.toFixed(1)} {activeMetricConfig.unit}</Text>
+                  <Text style={[styles.statValue, { color: activeMetricConfig.color }]}>
+                    {avgVal.toFixed(activeMetricConfig.precision)} {activeMetricConfig.unit}
+                  </Text>
                 </View>
 
                 <View style={styles.statBox}>
                   <Text style={styles.statLabel}>Minimum</Text>
-                  <Text style={[styles.statValue, { color: colors.info }]}>{Math.min(...values).toFixed(1)} {activeMetricConfig.unit}</Text>
+                  <Text style={[styles.statValue, { color: colors.info }]}>
+                    {minVal.toFixed(activeMetricConfig.precision)} {activeMetricConfig.unit}
+                  </Text>
                 </View>
 
                 <View style={styles.statBox}>
                   <Text style={styles.statLabel}>Maximum</Text>
-                  <Text style={[styles.statValue, { color: colors.warning }]}>{Math.max(...values).toFixed(1)} {activeMetricConfig.unit}</Text>
+                  <Text style={[styles.statValue, { color: colors.warning }]}>
+                    {maxVal.toFixed(activeMetricConfig.precision)} {activeMetricConfig.unit}
+                  </Text>
+                </View>
+
+                <View style={styles.statBox}>
+                  <Text style={styles.statLabel}>Total Logs</Text>
+                  <Text style={styles.statValue}>{readings.length}</Text>
                 </View>
               </View>
             </View>
 
             {/* Data Export Action */}
-            <TouchableOpacity style={[styles.exportBtn, shadows.small]} onPress={handleExport}>
+            <TouchableOpacity style={[styles.exportBtn, shadows.small]} onPress={handleExport} activeOpacity={0.8}>
               <Text style={styles.exportIcon}>📥</Text>
               <Text style={styles.exportText}>Export {activeMetricConfig.label} Logs (.CSV)</Text>
             </TouchableOpacity>
@@ -265,7 +346,7 @@ const styles = StyleSheet.create({
   },
   header: {
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+    paddingVertical: spacing.sm + 4,
     backgroundColor: colors.surface,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
@@ -273,10 +354,13 @@ const styles = StyleSheet.create({
   title: {
     ...typography.h2,
     fontSize: 20,
+    fontWeight: '800',
+    color: colors.textPrimary,
   },
   subtitle: {
     ...typography.caption,
     color: colors.textMuted,
+    marginTop: 2,
   },
   scrollContent: {
     padding: spacing.md,
@@ -289,7 +373,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs + 2,
+    paddingVertical: spacing.xs + 3,
     backgroundColor: colors.surfaceAlt,
     borderRadius: borderRadius.pill,
     marginRight: spacing.xs,
@@ -298,15 +382,17 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   metricIcon: {
-    fontSize: 14,
+    fontSize: 13,
   },
   metricTabText: {
     ...typography.caption,
     fontWeight: '600',
     color: colors.textSecondary,
+    fontSize: 12,
   },
   metricTabTextActive: {
     color: colors.textInverse,
+    fontWeight: '700',
   },
   periodFilterRow: {
     flexDirection: 'row',
@@ -316,16 +402,21 @@ const styles = StyleSheet.create({
   },
   periodLabel: {
     ...typography.label,
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.textSecondary,
   },
   periodGroup: {
     flexDirection: 'row',
     backgroundColor: colors.surfaceAlt,
     borderRadius: borderRadius.md,
-    padding: 2,
+    padding: 3,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   periodBtn: {
     paddingHorizontal: spacing.sm + 4,
-    paddingVertical: 4,
+    paddingVertical: 5,
     borderRadius: borderRadius.sm,
   },
   periodBtnActive: {
@@ -336,6 +427,7 @@ const styles = StyleSheet.create({
     ...typography.caption,
     fontWeight: '700',
     color: colors.textMuted,
+    fontSize: 11,
   },
   periodBtnTextActive: {
     color: colors.primaryDark,
@@ -345,66 +437,66 @@ const styles = StyleSheet.create({
     borderRadius: borderRadius.md,
     padding: spacing.md,
     marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   chartHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     marginBottom: spacing.md,
   },
   chartTitle: {
     ...typography.h3,
     fontSize: 16,
+    fontWeight: '700',
+    color: colors.textPrimary,
   },
   chartSub: {
     ...typography.caption,
     color: colors.textMuted,
+    marginTop: 2,
+  },
+  currentBadge: {
+    alignItems: 'flex-end',
+  },
+  currentBadgeLabel: {
+    fontSize: 10,
+    color: colors.textMuted,
+    fontWeight: '600',
   },
   currentValueBadge: {
     ...typography.h2,
-    fontSize: 18,
+    fontSize: 17,
+    fontWeight: '800',
   },
-  barsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-end',
-    height: 140,
-    paddingTop: spacing.md,
-  },
-  barColumn: {
-    flex: 1,
+  chartWrapper: {
+    marginTop: spacing.xs,
     alignItems: 'center',
-    height: '100%',
-    justifyContent: 'flex-end',
   },
-  barValText: {
-    ...typography.caption,
-    fontSize: 9,
+  axisText: {
     color: colors.textMuted,
-    marginBottom: 2,
-  },
-  barTrack: {
-    width: 14,
-    height: 100,
-    backgroundColor: colors.surfaceAlt,
-    borderRadius: borderRadius.xs,
-    justifyContent: 'flex-end',
-    overflow: 'hidden',
-  },
-  barFill: {
-    width: '100%',
-    borderRadius: borderRadius.xs,
-  },
-  barLabel: {
-    ...typography.caption,
     fontSize: 10,
-    marginTop: 4,
-    color: colors.textSecondary,
+  },
+  pointerTooltip: {
+    backgroundColor: colors.textPrimary,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: borderRadius.xs,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pointerTooltipVal: {
+    color: colors.textInverse,
+    fontSize: 10,
+    fontWeight: '700',
   },
   cardTitle: {
     ...typography.h3,
     fontSize: 15,
+    fontWeight: '700',
     marginBottom: spacing.sm,
+    color: colors.textPrimary,
   },
   statsGrid: {
     flexDirection: 'row',
@@ -417,15 +509,21 @@ const styles = StyleSheet.create({
     padding: spacing.sm,
     borderRadius: borderRadius.sm,
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   statLabel: {
     ...typography.caption,
     color: colors.textMuted,
+    fontSize: 10,
+    fontWeight: '600',
+    marginBottom: 2,
   },
   statValue: {
     ...typography.label,
-    fontSize: 14,
-    marginTop: 2,
+    fontSize: 13,
+    fontWeight: '800',
+    color: colors.textPrimary,
   },
   exportBtn: {
     flexDirection: 'row',
@@ -435,6 +533,9 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm + 4,
     borderRadius: borderRadius.md,
     gap: spacing.xs,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginBottom: spacing.xl,
   },
   exportIcon: {
     fontSize: 16,
@@ -442,5 +543,15 @@ const styles = StyleSheet.create({
   exportText: {
     ...typography.label,
     color: colors.primaryDark,
+    fontWeight: '700',
+  },
+  emptyContainer: {
+    height: 140,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyText: {
+    ...typography.caption,
+    color: colors.textMuted,
   },
 });

@@ -97,11 +97,17 @@ function ConnectDevicePage({ onComplete, isOnboarding = false }: ConnectDevicePa
       // Auto-select first discovered device if none explicitly picked
       setSelectedDeviceKey((prevKey) => {
         if (!prevKey || prevKey === '__manual__') {
-          setNodeCode(device.id)
+          const code = device.code || device.id
+          setNodeCode(code)
           setNodeWsUrl(`ws://${device.ip}:${device.port || 8081}`)
+          if (device.code === 'AQL-TEST' || device.id === 'test-master-node') {
+            setPairingPassword('testmaster123')
+          } else if (device.code === 'AQL-0001' || device.id === 'master-node') {
+            setPairingPassword('aqualora123')
+          }
           setIsManualMode(false)
           setPreviousNodeCode((prevCode) => {
-            if (prevCode && prevCode !== device.id) {
+            if (prevCode && prevCode !== code) {
               setIsNewNodeWarning(true)
             }
             return prevCode
@@ -125,9 +131,15 @@ function ConnectDevicePage({ onComplete, isOnboarding = false }: ConnectDevicePa
     setIsManualMode(false)
     const dev = discoveredDevices.find((d) => d.ip === key)
     if (dev) {
-      setNodeCode(dev.id)
+      const code = dev.code || dev.id
+      setNodeCode(code)
       setNodeWsUrl(`ws://${dev.ip}:${dev.port || 8081}`)
-      if (previousNodeCode && previousNodeCode !== dev.id) {
+      if (dev.code === 'AQL-TEST' || dev.id === 'test-master-node') {
+        setPairingPassword('testmaster123')
+      } else if (dev.code === 'AQL-0001' || dev.id === 'master-node') {
+        setPairingPassword('aqualora123')
+      }
+      if (previousNodeCode && previousNodeCode !== code) {
         setIsNewNodeWarning(true)
       } else {
         setIsNewNodeWarning(false)
@@ -179,8 +191,14 @@ function ConnectDevicePage({ onComplete, isOnboarding = false }: ConnectDevicePa
 
   function handleSelectDiscoveredDevice(device: DiscoveredMasterNode): void {
     setSelectedDeviceKey(device.ip)
-    setNodeCode(device.id)
+    const code = device.code || device.id
+    setNodeCode(code)
     setNodeWsUrl(`ws://${device.ip}:${device.port || 8081}`)
+    if (device.code === 'AQL-TEST' || device.id === 'test-master-node') {
+      setPairingPassword('testmaster123')
+    } else if (device.code === 'AQL-0001' || device.id === 'master-node') {
+      setPairingPassword('aqualora123')
+    }
     setIsManualMode(false)
     setStep('login')
   }
@@ -189,8 +207,14 @@ function ConnectDevicePage({ onComplete, isOnboarding = false }: ConnectDevicePa
     if (!selectedDeviceKey && discoveredDevices.length > 0) {
       const dev = discoveredDevices[0]
       setSelectedDeviceKey(dev.ip)
-      setNodeCode(dev.id)
+      const code = dev.code || dev.id
+      setNodeCode(code)
       setNodeWsUrl(`ws://${dev.ip}:${dev.port || 8081}`)
+      if (dev.code === 'AQL-TEST' || dev.id === 'test-master-node') {
+        setPairingPassword('testmaster123')
+      } else if (dev.code === 'AQL-0001' || dev.id === 'master-node') {
+        setPairingPassword('aqualora123')
+      }
       setIsManualMode(false)
     }
     setStep('login')
@@ -639,7 +663,7 @@ function ConnectDevicePage({ onComplete, isOnboarding = false }: ConnectDevicePa
                 ) : (
                   discoveredDevices.map((dev) => (
                     <option key={dev.ip} value={dev.ip}>
-                      ⚡ {dev.id} — {dev.ip}:{dev.port || 8081} ({dev.mode || 'STA'})
+                      ⚡ {dev.name ? `${dev.name} (${dev.code || dev.id})` : dev.id} — {dev.ip}:{dev.port || 8081} ({dev.mode || 'STA'})
                     </option>
                   ))
                 )}
@@ -663,7 +687,7 @@ function ConnectDevicePage({ onComplete, isOnboarding = false }: ConnectDevicePa
                 >
                   <span>🟢</span>
                   <span>
-                    Detected <strong>{activeDiscoveredNode.id}</strong> on <code>{activeDiscoveredNode.ip}</code> (WebSocket Port {activeDiscoveredNode.port || 8081})
+                    Detected <strong>{activeDiscoveredNode.name || activeDiscoveredNode.id}</strong> ({activeDiscoveredNode.code || activeDiscoveredNode.id}) on <code>{activeDiscoveredNode.ip}</code> (WebSocket Port {activeDiscoveredNode.port || 8081})
                   </span>
                 </div>
               )}

@@ -65,7 +65,7 @@ void setup() {
     initSensors();
 
     // Read Real-Time Clock date and time over I2C (SDA=25, SCL=26)
-    String timestampStr = "2026-01-01T00:00:00Z";
+    String timestampStr = "";
     if (rtcAvailable) {
         readRTCDateTime(timestampStr);
     }

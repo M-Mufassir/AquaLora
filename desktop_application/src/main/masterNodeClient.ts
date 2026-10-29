@@ -59,6 +59,18 @@ export class MasterNodeClient {
         `[masterNodeClient] connected to ${url}${this.encryptionKey ? ' (encrypted)' : ' (plain — dev/mock)'}`
       )
       this.onStatusChangeCallback?.('connected')
+
+      // Synchronize wall-clock time with Master Node immediately upon connection
+      try {
+        const epochSec = Math.floor(Date.now() / 1000)
+        this.sendCommand({
+          type: 'sync_time' as any,
+          epoch: epochSec
+        } as any)
+        console.log(`[masterNodeClient] sent sync_time downlink: ${epochSec}`)
+      } catch (err) {
+        console.warn('[masterNodeClient] could not send initial sync_time:', err)
+      }
     })
 
     this.socket.on('message', (data) => {

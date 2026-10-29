@@ -1,6 +1,7 @@
 // src/components/MiniTrendChart.tsx
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, LayoutChangeEvent } from 'react-native';
+import { LineChart, lineDataItem } from 'react-native-gifted-charts';
 import { Reading } from '../shared/types';
 import { colors, borderRadius, spacing, typography, shadows } from '../theme';
 
@@ -31,32 +32,59 @@ interface MiniTrendChartProps {
 
 export const MiniTrendChart: React.FC<MiniTrendChartProps> = ({ readings, loading }) => {
   const [selectedMetric, setSelectedMetric] = useState<MetricType>('temperature');
+  const [chartWidth, setChartWidth] = useState<number>(320);
   const activeMeta = METRICS.find(m => m.key === selectedMetric) || METRICS[0];
 
-  // Pick up to 8 recent points for clear readable mobile layout
-  const recentReadings = readings.slice(-8);
+  // Pick up to 10 recent readings for a clear, readable trend curve
+  const recentReadings = readings.slice(-10);
 
-  const points = recentReadings.map(r => {
+  const rawValues = recentReadings.map(r => {
+    const rawVal = r[selectedMetric];
+    return typeof rawVal === 'number' ? rawVal : 0;
+  });
+
+  const minVal = rawValues.length > 0 ? Math.min(...rawValues) : activeMeta.safeMin;
+  const maxVal = rawValues.length > 0 ? Math.max(...rawValues) : activeMeta.safeMax;
+  const avgVal = rawValues.length > 0 ? rawValues.reduce((a, b) => a + b, 0) / rawValues.length : 0;
+
+  // Format data items for gifted-charts LineChart
+  const chartData: lineDataItem[] = recentReadings.map((r, idx) => {
     const rawVal = r[selectedMetric];
     const val = typeof rawVal === 'number' ? rawVal : 0;
     const date = new Date(r.timestamp);
     const timeStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    // Show labels sparsely so x-axis is clean and legible
+    const showLabel = idx === 0 || idx === Math.floor(recentReadings.length / 2) || idx === recentReadings.length - 1;
+
     return {
       value: val,
-      timeStr,
-      isSafe: val >= activeMeta.safeMin && val <= activeMeta.safeMax,
+      label: showLabel ? timeStr : '',
+      labelTextStyle: {
+        color: colors.textMuted,
+        fontSize: 10,
+        fontWeight: '500',
+      },
+      dataPointText: '',
+      dataPointColor: activeMeta.color,
+      dataPointRadius: 4,
     };
   });
 
-  const values = points.map(p => p.value);
-  const minVal = values.length > 0 ? Math.min(...values, activeMeta.safeMin * 0.9) : activeMeta.safeMin;
-  const maxVal = values.length > 0 ? Math.max(...values, activeMeta.safeMax * 1.1) : activeMeta.safeMax;
-  const range = (maxVal - minVal) || 1;
-  const avgVal = values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : 0;
+  const handleLayout = (e: LayoutChangeEvent) => {
+    const width = e.nativeEvent.layout.width;
+    if (width > 0) {
+      setChartWidth(width);
+    }
+  };
+
+  const calculatedSpacing = chartData.length > 1
+    ? Math.max(28, (chartWidth - 75) / (chartData.length - 1))
+    : 40;
 
   return (
-    <View style={[styles.card, shadows.medium]}>
-      {/* Chart Title & Quick Metric Selector Tabs */}
+    <View style={[styles.card, shadows.medium]} onLayout={handleLayout}>
+      {/* Header with Title and Current Safe Range */}
       <View style={styles.header}>
         <View>
           <Text style={styles.title}>24h Telemetry Trend</Text>
@@ -72,7 +100,7 @@ export const MiniTrendChart: React.FC<MiniTrendChartProps> = ({ readings, loadin
         </View>
       </View>
 
-      {/* Metric Selector Buttons */}
+      {/* Metric Selector Pills */}
       <View style={styles.tabsRow}>
         {METRICS.map(m => {
           const isActive = m.key === selectedMetric;
@@ -84,6 +112,7 @@ export const MiniTrendChart: React.FC<MiniTrendChartProps> = ({ readings, loadin
                 isActive && { backgroundColor: m.color, borderColor: m.color },
               ]}
               onPress={() => setSelectedMetric(m.key)}
+              activeOpacity={0.7}
             >
               <Text style={styles.tabIcon}>{m.icon}</Text>
               <Text style={[styles.tabText, isActive && styles.tabTextActive]}>
@@ -94,41 +123,88 @@ export const MiniTrendChart: React.FC<MiniTrendChartProps> = ({ readings, loadin
         })}
       </View>
 
-      {/* Chart Canvas / Bar Area */}
+      {/* Chart Canvas */}
       {loading ? (
         <View style={styles.emptyContainer}>
           <Text style={styles.emptyText}>Fetching past telemetry...</Text>
         </View>
-      ) : points.length === 0 ? (
+      ) : chartData.length === 0 ? (
         <View style={styles.emptyContainer}>
           <Text style={styles.emptyText}>No historical data logged yet for this node.</Text>
         </View>
       ) : (
-        <View style={styles.chartContainer}>
-          {/* Upper / Lower threshold reference line indicators */}
-          <View style={styles.barsContainer}>
-            {points.map((pt, idx) => {
-              const heightPct = Math.min(100, Math.max(14, ((pt.value - minVal) / range) * 100));
-              return (
-                <View key={idx} style={styles.barCol}>
-                  <Text style={styles.barValueText}>
-                    {pt.value.toFixed(activeMeta.precision)}
-                  </Text>
-                  <View style={styles.barTrack}>
-                    <View
-                      style={[
-                        styles.barFill,
-                        {
-                          height: `${heightPct}%`,
-                          backgroundColor: pt.isSafe ? activeMeta.color : colors.warning,
-                        },
-                      ]}
-                    />
+        <View style={styles.chartWrapper}>
+          <LineChart
+            data={chartData}
+            height={140}
+            spacing={calculatedSpacing}
+            initialSpacing={12}
+            endSpacing={12}
+            color={activeMeta.color}
+            thickness={2.8}
+            curved
+            areaChart
+            startFillColor={activeMeta.color}
+            endFillColor={`${activeMeta.color}08`}
+            startOpacity={0.35}
+            endOpacity={0.03}
+            dataPointsColor={activeMeta.color}
+            dataPointsRadius={4}
+            hideDataPoints={chartData.length > 12}
+            noOfSections={3}
+            rulesType="solid"
+            rulesColor={colors.border}
+            yAxisColor="transparent"
+            xAxisColor={colors.border}
+            yAxisTextStyle={styles.axisText}
+            xAxisLabelTextStyle={styles.axisText}
+            yAxisLabelWidth={38}
+            isAnimated
+            animationDuration={500}
+            pointerConfig={{
+              pointerStripHeight: 125,
+              pointerStripColor: activeMeta.color,
+              pointerStripWidth: 1.5,
+              pointerColor: activeMeta.color,
+              radius: 5,
+              pointerLabelWidth: 80,
+              pointerLabelHeight: 34,
+              autoAdjustPointerLabelPosition: true,
+              pointerLabelComponent: (items: any) => {
+                const item = items[0];
+                return (
+                  <View style={styles.pointerTooltip}>
+                    <Text style={styles.pointerTooltipVal}>
+                      {Number(item?.value || 0).toFixed(activeMeta.precision)} {activeMeta.unit}
+                    </Text>
                   </View>
-                  <Text style={styles.barTimeText}>{pt.timeStr}</Text>
-                </View>
-              );
-            })}
+                );
+              },
+            }}
+          />
+
+          {/* Quick Metrics Glance Footer */}
+          <View style={styles.glanceRow}>
+            <View style={styles.glanceItem}>
+              <Text style={styles.glanceLabel}>Min</Text>
+              <Text style={styles.glanceVal}>
+                {minVal.toFixed(activeMeta.precision)} {activeMeta.unit}
+              </Text>
+            </View>
+            <View style={styles.glanceDivider} />
+            <View style={styles.glanceItem}>
+              <Text style={styles.glanceLabel}>Avg</Text>
+              <Text style={[styles.glanceVal, { color: activeMeta.color }]}>
+                {avgVal.toFixed(activeMeta.precision)} {activeMeta.unit}
+              </Text>
+            </View>
+            <View style={styles.glanceDivider} />
+            <View style={styles.glanceItem}>
+              <Text style={styles.glanceLabel}>Max</Text>
+              <Text style={styles.glanceVal}>
+                {maxVal.toFixed(activeMeta.precision)} {activeMeta.unit}
+              </Text>
+            </View>
           </View>
         </View>
       )}
@@ -153,12 +229,14 @@ const styles = StyleSheet.create({
   },
   title: {
     ...typography.h3,
-    fontSize: 16,
+    fontSize: 15,
+    fontWeight: '700',
     color: colors.textPrimary,
   },
   subtitle: {
     ...typography.caption,
     color: colors.textMuted,
+    marginTop: 2,
   },
   avgBadge: {
     flexDirection: 'row',
@@ -187,7 +265,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 6,
+    paddingVertical: 7,
     borderRadius: borderRadius.sm,
     backgroundColor: colors.surfaceAlt,
     borderWidth: 1,
@@ -195,7 +273,7 @@ const styles = StyleSheet.create({
     gap: 3,
   },
   tabIcon: {
-    fontSize: 12,
+    fontSize: 11,
   },
   tabText: {
     ...typography.caption,
@@ -207,50 +285,58 @@ const styles = StyleSheet.create({
     color: colors.textInverse,
     fontWeight: '700',
   },
-  chartContainer: {
+  chartWrapper: {
     marginTop: spacing.xs,
-    height: 140,
-  },
-  barsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-end',
-    height: 135,
-    paddingTop: 8,
-  },
-  barCol: {
-    flex: 1,
     alignItems: 'center',
-    height: '100%',
-    justifyContent: 'flex-end',
   },
-  barValueText: {
-    ...typography.caption,
-    fontSize: 9,
-    fontWeight: '600',
-    color: colors.textSecondary,
+  axisText: {
+    color: colors.textMuted,
+    fontSize: 10,
+  },
+  pointerTooltip: {
+    backgroundColor: colors.textPrimary,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: borderRadius.xs,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pointerTooltipVal: {
+    color: colors.textInverse,
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  glanceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-around',
+    width: '100%',
+    marginTop: spacing.md,
+    paddingTop: spacing.xs,
+    borderTopWidth: 1,
+    borderTopColor: colors.divider,
+  },
+  glanceItem: {
+    alignItems: 'center',
+  },
+  glanceLabel: {
+    fontSize: 10,
+    color: colors.textMuted,
+    fontWeight: '500',
     marginBottom: 2,
   },
-  barTrack: {
-    width: 14,
-    height: 90,
-    backgroundColor: colors.surfaceAlt,
-    borderRadius: borderRadius.xs,
-    justifyContent: 'flex-end',
-    overflow: 'hidden',
+  glanceVal: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.textPrimary,
   },
-  barFill: {
-    width: '100%',
-    borderRadius: borderRadius.xs,
-  },
-  barTimeText: {
-    ...typography.caption,
-    fontSize: 9,
-    color: colors.textMuted,
-    marginTop: 4,
+  glanceDivider: {
+    width: 1,
+    height: 18,
+    backgroundColor: colors.divider,
   },
   emptyContainer: {
-    height: 100,
+    height: 120,
     alignItems: 'center',
     justifyContent: 'center',
   },

@@ -6,8 +6,8 @@
  * HARDWARE PINOUT:
  * - RA-02 LoRa SPI: SCK=GPIO18, MISO=GPIO19, MOSI=GPIO23, NSS=GPIO5, RST=GPIO27, DIO0=GPIO13
  * - OLED I2C: SDA=GPIO21, SCL=GPIO22 (1.3" SH1106 / 0.96" SSD1306)
- * - Wi-Fi AP: SSID="AquaLoRa-MasterNode", Password="aqualora123"
- * - WebSocket Server: Port 8081 (ws://192.168.4.1:8081) with AES-256-GCM encryption
+ * - Wi-Fi: Pure Station mode (joins external 2.4GHz hotspot "Aqualora", no AP mode)
+ * - WebSocket Server: Port 8081 with AES-256-GCM encryption
  */
 
 #include <Wire.h>

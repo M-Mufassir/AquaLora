@@ -87,6 +87,20 @@ class NodeConfig(SQLModel, table=True):
     updated_at: str | None = None
 
 
+class DeviceToken(SQLModel, table=True):
+    """FCM and Expo Push tokens for alerting connected mobile apps"""
+    __tablename__ = 'devicetoken'
+    __table_args__ = {'extend_existing': True}
+
+    id: int | None = Field(default=None, primary_key=True)
+    master_node_id: int = Field(index=True, foreign_key='masternode.id')
+    token: str = Field(index=True, unique=True)
+    platform: str = Field(default='android')  # 'android' | 'ios'
+    device_name: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
 def init_db() -> None:
     SQLModel.metadata.create_all(engine)
 

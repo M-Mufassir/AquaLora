@@ -38,6 +38,8 @@ export function startUdpDiscovery(onDiscovered: DeviceDiscoveredCallback): void 
 
           const device: DiscoveredMasterNode = {
             id: deviceId,
+            code: data.code ? String(data.code) : undefined,
+            name: data.name ? String(data.name) : undefined,
             ip: deviceIp,
             port: devicePort,
             service: data.service ?? 'aqualora-master',

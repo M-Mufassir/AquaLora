@@ -193,6 +193,18 @@ export function initDb(): Database.Database {
     }
   }
 
+  // Auto-clean legacy dummy test records with placeholder timestamp (e.g. 2026-01-01T00:00:00Z)
+  try {
+    const purged = db.prepare(
+      "DELETE FROM readings WHERE timestamp = '2026-01-01T00:00:00Z' OR timestamp LIKE '2026-01-01T00:00:00%'"
+    ).run()
+    if (purged.changes > 0) {
+      console.log(`[db] Cleaned ${purged.changes} legacy dummy reading records with unset 2026-01-01 timestamps.`)
+    }
+  } catch (cleanErr) {
+    console.warn('[db] Legacy dummy readings cleanup warning:', cleanErr)
+  }
+
   return db
 }
 

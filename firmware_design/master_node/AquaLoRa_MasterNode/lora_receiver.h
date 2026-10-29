@@ -199,9 +199,17 @@ inline void processIncomingLoRa() {
         updateDisplayLive(nodeId, tempC, tdsPPM, turbidityNTU, phVal, rssi, snr, g_packetCounter);
         Serial.println(F("[OLED] Display refreshed with live telemetry readings."));
 
-        // BROADCAST ENCRYPTED TELEMETRY TO DASHBOARD VIA WEBSOCKET
-        broadcastLoRaTelemetryWS(nodeId, timestampStr, tempC, tdsPPM, turbidityNTU, phVal, rssi);
-        Serial.println(F("[WS] Telemetry encrypted & broadcasted to dashboard."));
+        // Determine accurate ISO 8601 timestamp (prefer packet time if valid, fallback to real wall-clock time)
+        String validTimestamp = (timestampStr.length() > 0 && timestampStr != "Unknown" && !timestampStr.startsWith("2026-01-01T00:00:00"))
+            ? timestampStr : isoTimestampNow();
+
+        // 1. BROADCAST ENCRYPTED TELEMETRY TO DESKTOP VIA WEBSOCKET
+        broadcastLoRaTelemetryWS(nodeId, validTimestamp, tempC, tdsPPM, turbidityNTU, phVal, rssi);
+        Serial.println(F("[WS] Telemetry encrypted & broadcasted to desktop dashboard."));
+
+        // 2. SIMULTANEOUSLY SYNCHRONIZE DIRECTLY TO CLOUD BACKEND
+        // Enables mobile phone app to view readings even when desktop app is OFF!
+        syncReadingToCloud(nodeId, validTimestamp, tempC, tdsPPM, turbidityNTU, phVal, rssi);
     } else {
         Serial.println(F("[PARSER] WARNING: Received payload format invalid! Expected 'NodeID,Timestamp,Temp,TDS,Turb,pH'"));
     }

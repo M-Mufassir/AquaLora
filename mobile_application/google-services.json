@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "999930146835",
+    "project_id": "aqualora-55546",
+    "storage_bucket": "aqualora-55546.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:999930146835:android:6379201f910e1db5d1cfe6",
+        "android_client_info": {
+          "package_name": "aqualora.mobile"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA4cGg47Lm9jE6T_lL0LSQNbJCcLuTYBOU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

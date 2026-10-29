@@ -26,8 +26,18 @@
         "foregroundImage": "./assets/icon.png",
         "backgroundColor": "#0B1F2A"
       },
-      "package": "com.mfsr.aqualoramobile"
+      "package": "aqualora.mobile",
+      "googleServicesFile": "./google-services.json"
     },
+    "plugins": [
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#0284C7"
+        }
+      ]
+    ],
     "web": {
       "favicon": "./assets/favicon.png"
     },

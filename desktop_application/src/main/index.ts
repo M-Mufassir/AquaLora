@@ -195,12 +195,17 @@ async function performCloudSync(isManual = false): Promise<CloudSyncStatus> {
     if ((!accessToken || accessToken.startsWith('local-')) && activeCode) {
       try {
         const loginUrl = resolveCloudUrl('/auth/login', baseUrl)
+        const authNodeCode = (activeCode === 'master-node' || activeCode === 'AquaLoRa-Master') ? 'AQL-0001' : activeCode
+        const authPassword =
+          authNodeCode === 'AQL-TEST' || activeCode === 'test-master-node' || activeCode === 'test-master'
+            ? 'testmaster123'
+            : 'aqualora123'
         const res = await fetch(loginUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            node_code: activeCode,
-            password: 'aqualora123',
+            node_code: authNodeCode,
+            password: authPassword,
             client: 'desktop'
           })
         })
@@ -343,8 +348,8 @@ async function performCloudSync(isManual = false): Promise<CloudSyncStatus> {
 
     try {
       const [historyResponse, alertsResponse, nodesResponse, profileResponse] = await Promise.all([
-        fetch(resolveCloudUrl('/readings/history?limit=300', baseUrl), { headers }),
-        fetch(resolveCloudUrl('/alerts/history?limit=100', baseUrl), { headers }),
+        fetch(resolveCloudUrl('/readings/history?limit=1000', baseUrl), { headers }),
+        fetch(resolveCloudUrl('/alerts/history?limit=200', baseUrl), { headers }),
         fetch(resolveCloudUrl('/nodes', baseUrl), { headers }),
         fetch(resolveCloudUrl('/master-nodes/me', baseUrl), { headers })
       ])
@@ -374,18 +379,49 @@ async function performCloudSync(isManual = false): Promise<CloudSyncStatus> {
         }
       }
 
-      // 5b. Download and sync readings
+      // 5b. Download and sync readings (with multi-page catchup for missing/older records)
       if (historyResponse.ok) {
         const payload = (await historyResponse.json()) as any
-        const rows = Array.isArray(payload) ? payload : payload.readings ?? payload.data ?? []
-        const cloudReadings = rows
+        const initialRows = Array.isArray(payload) ? payload : payload.readings ?? payload.data ?? []
+        const allCloudRows = [...initialRows]
+        let currentBatch = initialRows
+        let pageCount = 1
+        const maxPages = 5 // Fetch up to 5,000 missing readings
+
+        while (currentBatch.length >= 1000 && pageCount < maxPages) {
+          const oldestTime = currentBatch[currentBatch.length - 1]?.timestamp ?? currentBatch[currentBatch.length - 1]?.created_at
+          if (!oldestTime) break
+          try {
+            const nextUrl = resolveCloudUrl(`/readings/history?limit=1000&end=${encodeURIComponent(oldestTime)}`, baseUrl)
+            const nextRes = await fetch(nextUrl, { headers })
+            if (!nextRes.ok) break
+            const nextPayload = (await nextRes.json()) as any
+            const nextRows = Array.isArray(nextPayload) ? nextPayload : nextPayload.readings ?? nextPayload.data ?? []
+            if (nextRows.length <= 1) break
+            const sliced = nextRows.slice(1) // exclude overlapping boundary record
+            allCloudRows.push(...sliced)
+            currentBatch = nextRows
+            pageCount++
+          } catch {
+            break
+          }
+        }
+
+        const cloudReadings = allCloudRows
           .map((row: any) => ({
             ...row,
             node_id: String(row.node_id ?? row.nodeId),
             timestamp: row.timestamp ?? row.created_at
           }))
           .filter((row: any) => row.node_id && row.timestamp && row.temperature != null)
-          .filter((row: any) => !row.master_node_code || row.master_node_code === activeCode)
+          .filter((row: any) => !row.timestamp.startsWith('2026-01-01T00:00:00')) // Ignore placeholder dummy timestamps
+          .filter(
+            (row: any) =>
+              !row.master_node_code ||
+              row.master_node_code === activeCode ||
+              activeCode === 'master-node' ||
+              activeCode === 'AQL-0001'
+          )
 
         const newReadings = filterNewReadings(cloudReadings)
         if (newReadings.length > 0) {
@@ -611,8 +647,14 @@ app.whenReady().then(() => {
         masterNodeClient.connect(wsUrl)
       }
 
+      const defaultPassword =
+        nodeCode === 'AQL-TEST' || nodeCode === 'test-master-node' || nodeCode === 'test-master'
+          ? 'testmaster123'
+          : 'aqualora123'
+      const effectivePassword = password || defaultPassword
+
       // 4. Upsert user in local SQLite database (using new node code as username)
-      upsertUser(nodeCode, password || 'aqualora123', 'operator')
+      upsertUser(nodeCode, effectivePassword, 'operator')
 
       // 5. Cloud Registration & Authentication
       let session: CloudSessionData | null = null
@@ -633,7 +675,7 @@ app.whenReady().then(() => {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               node_code: nodeCode,
-              password: password || 'aqualora123',
+              password: effectivePassword,
               client: 'desktop'
             }),
             signal: controller.signal
@@ -1135,7 +1177,18 @@ app.whenReady().then(() => {
   let cloudSyncDebounceTimer: NodeJS.Timeout | null = null
 
   masterNodeClient.onReading((reading) => {
-    console.log('[main] reading received:', reading)
+    // Sanitize timestamp: if missing, unset, or dummy placeholder, use current real wall-clock time!
+    const isPlaceholderTime =
+      !reading.timestamp ||
+      reading.timestamp === 'Unknown' ||
+      reading.timestamp === '2026-01-01T00:00:00Z' ||
+      reading.timestamp.startsWith('2026-01-01T00:00') ||
+      reading.timestamp.startsWith('1970-01-01') ||
+      isNaN(new Date(reading.timestamp).getTime())
+    if (isPlaceholderTime) {
+      reading.timestamp = new Date().toISOString()
+    }
+    console.log('[main] reading received (timestamp: %s):', reading.timestamp, reading)
     const activeCode = getActiveMasterNodeCode() ?? getSettingOptional('master_node_code') ?? undefined
     try {
       const node = upsertNodeFromReading(reading, activeCode)

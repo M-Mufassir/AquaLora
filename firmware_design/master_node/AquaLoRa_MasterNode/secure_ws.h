@@ -10,6 +10,8 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <WiFiUdp.h>
+#include <HTTPClient.h>
+#include <WiFiClientSecure.h>
 #include <WebSocketsServer.h>
 #include <ArduinoJson.h>
 #include <time.h>
@@ -191,17 +193,49 @@ inline bool decryptEnvelope(const String &envelopeJson, String &outPlain)
     return true;
 }
 
+static bool g_ntpSyncStarted = false;
+static bool g_clockSynchronized = false;
+static String g_cloudAuthToken = "";
+
 /**
- * @brief Seed fake clock at boot for monotonic ISO 8601 timestamps.
+ * @brief Initialize SNTP network time sync over Wi-Fi.
  */
-inline void seedFakeClock()
+inline void initNtpClock()
 {
-    struct timeval tv = {.tv_sec = 1767225600, .tv_usec = 0}; // 2026-01-01T00:00:00Z
-    settimeofday(&tv, nullptr);
+    Serial.println(F("[NTP] Initializing SNTP time synchronization..."));
+    configTime(0, 0, NTP_SERVER1, NTP_SERVER2, NTP_SERVER3);
+    g_ntpSyncStarted = true;
 }
 
 /**
- * @brief Generate ISO 8601 UTC timestamp string.
+ * @brief Check if system clock has acquired real wall-clock time (> 1700000000).
+ */
+inline bool isClockSynchronized()
+{
+    time_t now = time(nullptr);
+    if (now > 1700000000)
+    {
+        g_clockSynchronized = true;
+        return true;
+    }
+    return g_clockSynchronized;
+}
+
+/**
+ * @brief Seed initial fallback monotonic clock if NTP not yet locked.
+ */
+inline void seedInitialClock()
+{
+    time_t now = time(nullptr);
+    if (now < 1000000) {
+        // Only set fallback if clock is completely uninitialized (at epoch 0)
+        struct timeval tv = {.tv_sec = 1767225600, .tv_usec = 0};
+        settimeofday(&tv, nullptr);
+    }
+}
+
+/**
+ * @brief Generate ISO 8601 UTC timestamp string from real wall-clock time.
  */
 inline String isoTimestampNow()
 {
@@ -211,6 +245,167 @@ inline String isoTimestampNow()
     char buf[25];
     strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &tmInfo);
     return String(buf);
+}
+
+/**
+ * @brief Authenticate directly with Cloud Backend to obtain JWT Bearer token.
+ */
+inline bool loginCloudBackend()
+{
+    if (WiFi.status() != WL_CONNECTED)
+    {
+        return false;
+    }
+
+    WiFiClientSecure secClient;
+    secClient.setInsecure(); // Accept Azure HTTPS without bundle size overhead
+    HTTPClient http;
+    http.setTimeout(CLOUD_REQUEST_TIMEOUT_MS);
+
+    String loginUrl = String(CLOUD_API_BASE_URL) + "/auth/login";
+    if (!http.begin(secClient, loginUrl))
+    {
+        Serial.println(F("[CLOUD] Error: Failed to initiate HTTP connection to /auth/login"));
+        return false;
+    }
+
+    http.addHeader("Content-Type", "application/json");
+
+    StaticJsonDocument<256> reqDoc;
+    reqDoc["node_code"] = CLOUD_MASTER_NODE_CODE;
+    reqDoc["password"] = CLOUD_MASTER_PASSWORD;
+    reqDoc["client"] = CLOUD_CLIENT_ID;
+
+    String reqBody;
+    serializeJson(reqDoc, reqBody);
+
+    Serial.printf("[CLOUD] Authenticating to cloud as '%s'...\n", CLOUD_MASTER_NODE_CODE);
+    int httpCode = http.POST(reqBody);
+
+    if (httpCode == 200)
+    {
+        String respPayload = http.getString();
+        StaticJsonDocument<512> respDoc;
+        DeserializationError err = deserializeJson(respDoc, respPayload);
+        if (!err)
+        {
+            const char *token = respDoc["access_token"] | respDoc["token"] | "";
+            if (strlen(token) > 0)
+            {
+                g_cloudAuthToken = String(token);
+                Serial.println(F("[CLOUD] Authentication SUCCESS: JWT token acquired!"));
+                http.end();
+                return true;
+            }
+        }
+    }
+    else
+    {
+        Serial.printf("[CLOUD] Login failed (HTTP %d)\n", httpCode);
+    }
+
+    http.end();
+    return false;
+}
+
+/**
+ * @brief Directly synchronize reading telemetry to Cloud Backend API.
+ * Ensures data reaches cloud even when desktop application is OFF!
+ */
+inline bool syncReadingToCloud(const String &nodeId, const String &timestamp, float temp, int tds, float turb, float ph, int rssi)
+{
+    if (!CLOUD_SYNC_ENABLED)
+        return false;
+
+    if (WiFi.status() != WL_CONNECTED)
+    {
+        Serial.println(F("[CLOUD] Wi-Fi offline. Telemetry sync to cloud skipped."));
+        return false;
+    }
+
+    // Acquire JWT token if missing
+    if (g_cloudAuthToken.length() == 0)
+    {
+        if (!loginCloudBackend())
+        {
+            Serial.println(F("[CLOUD] Unable to sync reading: Authentication failed."));
+            return false;
+        }
+    }
+
+    WiFiClientSecure secClient;
+    secClient.setInsecure();
+    HTTPClient http;
+    http.setTimeout(CLOUD_REQUEST_TIMEOUT_MS);
+
+    String syncUrl = String(CLOUD_API_BASE_URL) + "/readings/sync";
+    if (!http.begin(secClient, syncUrl))
+    {
+        Serial.println(F("[CLOUD] Error connecting to /readings/sync"));
+        return false;
+    }
+
+    http.addHeader("Content-Type", "application/json");
+    http.addHeader("Authorization", "Bearer " + g_cloudAuthToken);
+
+    StaticJsonDocument<512> doc;
+    JsonArray readings = doc.createNestedArray("readings");
+    JsonObject r = readings.createNestedObject();
+    r["node_id"] = nodeId;
+    r["timestamp"] = timestamp;
+    r["temperature"] = temp;
+    r["turbidity"] = turb;
+    r["tds"] = tds;
+    r["ph"] = ph;
+    r["pond_type"] = "tilapia";
+    r["battery_pct"] = 95;
+    r["rssi"] = rssi;
+
+    String body;
+    serializeJson(doc, body);
+
+    Serial.printf("[CLOUD] Syncing reading to cloud (%s @ %s)...\n", nodeId.c_str(), timestamp.c_str());
+    int httpCode = http.POST(body);
+
+    if (httpCode == 200 || httpCode == 201)
+    {
+        Serial.printf("[CLOUD] SUCCESS: Telemetry saved in cloud database! (HTTP %d)\n", httpCode);
+        http.end();
+        return true;
+    }
+    else if (httpCode == 401)
+    {
+        // Expired token: clear and retry once
+        Serial.println(F("[CLOUD] Token expired (HTTP 401). Refreshing token and retrying..."));
+        g_cloudAuthToken = "";
+        http.end();
+        if (loginCloudBackend())
+        {
+            WiFiClientSecure secRetry;
+            secRetry.setInsecure();
+            HTTPClient httpRetry;
+            httpRetry.setTimeout(CLOUD_REQUEST_TIMEOUT_MS);
+            if (httpRetry.begin(secRetry, syncUrl))
+            {
+                httpRetry.addHeader("Content-Type", "application/json");
+                httpRetry.addHeader("Authorization", "Bearer " + g_cloudAuthToken);
+                int retryCode = httpRetry.POST(body);
+                httpRetry.end();
+                if (retryCode == 200 || retryCode == 201)
+                {
+                    Serial.println(F("[CLOUD] SUCCESS: Reading synced on retry with new token!"));
+                    return true;
+                }
+            }
+        }
+    }
+    else
+    {
+        Serial.printf("[CLOUD] Warning: Sync returned HTTP %d\n", httpCode);
+    }
+
+    http.end();
+    return false;
 }
 
 /**
@@ -313,6 +508,18 @@ inline void handleDownlinkCommand(const String &plain)
         g_samplingIntervalMs = (unsigned long)minutes * 60000UL;
         Serial.printf("[WS] Downlink command: set_interval -> %ld minute(s)\n", minutes);
     }
+    else if (strcmp(type, "sync_time") == 0)
+    {
+        long epochSec = cmd["epoch"] | 0;
+        if (epochSec > 1700000000)
+        {
+            struct timeval tv = {.tv_sec = (time_t)epochSec, .tv_usec = 0};
+            settimeofday(&tv, nullptr);
+            g_clockSynchronized = true;
+            Serial.printf("[TIME] System clock synchronized via desktop downlink: %ld (Now: %s)\n",
+                          epochSec, isoTimestampNow().c_str());
+        }
+    }
 }
 
 /**
@@ -355,6 +562,7 @@ inline void sendDiscoveryBeacon()
     beacon["service"] = "aqualora-master";
     beacon["id"] = MASTER_NODE_ID;
     beacon["code"] = MASTER_NODE_CODE;
+    beacon["name"] = "AquaLoRa Master Node";
     beacon["ip"] = WiFi.localIP().toString();
     beacon["port"] = WEBSOCKET_PORT;
     beacon["mode"] = "STA";
@@ -384,7 +592,7 @@ inline void sendDiscoveryBeacon()
 inline bool initSecureWebSocket()
 {
     Serial.println(F("\n[WIFI] Initializing Master Node Wi-Fi Station connection..."));
-    seedFakeClock();
+    seedInitialClock();
     randomSeed(esp_random());
     initCipher();
     
@@ -448,6 +656,12 @@ inline bool initSecureWebSocket()
         Serial.printf("[WIFI] Gateway IP     : %s\n", WiFi.gatewayIP().toString().c_str());
         Serial.printf("[WIFI] Signal Strength: %d dBm\n", WiFi.RSSI());
         Serial.println(F("[WIFI] =============================================="));
+
+        // 1. Synchronize real UTC wall-clock time via SNTP
+        initNtpClock();
+
+        // 2. Pre-authenticate with Cloud Backend for autonomous sync
+        loginCloudBackend();
     }
     else
     {
@@ -483,6 +697,8 @@ inline bool initSecureWebSocket()
     return true;
 }
 
+static bool g_wifiConnectedHandled = false;
+
 /**
  * @brief Non-blocking WebSocket loop process.
  */
@@ -490,6 +706,23 @@ inline void processWebSocket()
 {
     g_webSocket.loop();
     const unsigned long now = millis();
+
+    // Check Wi-Fi state transition
+    if (WiFi.status() == WL_CONNECTED)
+    {
+        if (!g_wifiConnectedHandled)
+        {
+            g_wifiConnectedHandled = true;
+            Serial.println(F("[WIFI] Wi-Fi connected! Starting NTP sync and Cloud auth..."));
+            initNtpClock();
+            loginCloudBackend();
+        }
+    }
+    else
+    {
+        g_wifiConnectedHandled = false;
+    }
+
     if (now - g_lastDiscoveryMs >= DISCOVERY_INTERVAL_MS)
     {
         g_lastDiscoveryMs = now;

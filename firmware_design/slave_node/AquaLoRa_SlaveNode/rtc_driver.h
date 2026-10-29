@@ -106,7 +106,7 @@ inline bool readRTCDateTime(String &timestampStr) {
     Wire.beginTransmission(PCF8563_I2C_ADDR);
     Wire.write(PCF8563_REG_VL_SECONDS); // Start reading at register 0x02
     if (Wire.endTransmission() != 0) {
-        timestampStr = "2026-01-01T00:00:00Z"; // Fallback timestamp
+        timestampStr = ""; // Let Master Node timestamp using real wall-clock / NTP
         Serial.println(F("[RTC] ERROR: Failed to transmit start register for reading date/time."));
         return false;
     }
@@ -114,7 +114,7 @@ inline bool readRTCDateTime(String &timestampStr) {
     // Request 7 bytes (Seconds, Minutes, Hours, Days, Weekdays, Months/Century, Years)
     uint8_t bytesRead = Wire.requestFrom((uint8_t)PCF8563_I2C_ADDR, (uint8_t)7);
     if (bytesRead < 7) {
-        timestampStr = "2026-01-01T00:00:00Z";
+        timestampStr = "";
         Serial.println(F("[RTC] ERROR: Incomplete byte read from PCF8563."));
         return false;
     }

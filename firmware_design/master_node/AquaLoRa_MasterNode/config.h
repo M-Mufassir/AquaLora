@@ -3,11 +3,12 @@
  * @brief Master System Configuration & Hardware Pinout Definitions
  * @project AquaLoRa Marine Telemetry System - Master Receiver Node
  *
- * HARDWARE WIRING VERIFIED:
+ * - HARDWARE WIRING VERIFIED:
  * - RA-02 LoRa SPI: SCK=18, MISO=19, MOSI=23, NSS=5, RST=27, DIO0=13
  * - OLED I2C: SDA=21, SCL=22 (Address 0x3C)
  * - DISPLAY TYPE: 1.3" OLEDs physically use the SH1106 driver IC (IS_SH1106_DISPLAY = true)
- * - WIFI AP: SSID="AquaLoRa-MasterNode", Password="aqualora123"
+ * - WIFI STATION: Connects to external 2.4GHz Wi-Fi / hotspot ("Aqualora", Password="Aqualora")
+ * - WEBSOCKET GATEWAY: Port 8081, AES-256-GCM Pairing Password="aqualora123"
  */
 
 #ifndef CONFIG_H
@@ -65,7 +66,25 @@
 #define UDP_DISCOVERY_PORT 8082            ///< Desktop discovery beacon port
 #define MDNS_HOSTNAME "aqualora"           ///< mDNS hostname (resolvable at aqualora.local)
 #define MASTER_NODE_ID "master-node"       ///< Gateway identity
-#define MASTER_NODE_CODE "AQL-001"         ///< Gateway code
+#define MASTER_NODE_CODE "AQL-0001"        ///< Gateway code (matches cloud database)
+#define MASTER_NODE_CODE_ALT "AQL-001"     ///< Legacy gateway code
 #define DISCOVERY_INTERVAL_MS 1000         ///< UDP presence beacon interval (1.0s for instant desktop detection)
+
+// ============================================================================
+// CLOUD BACKEND DIRECT SYNC CONFIGURATION (Direct from Master Node)
+// ============================================================================
+#define CLOUD_SYNC_ENABLED true
+#define CLOUD_API_BASE_URL "https://aqualora-backend-brdufwffeddhd6a8.centralindia-01.azurewebsites.net/api"
+#define CLOUD_MASTER_NODE_CODE "AQL-0001"   ///< Master node account on cloud
+#define CLOUD_MASTER_PASSWORD "aqualora123" ///< Master node credentials
+#define CLOUD_CLIENT_ID "masternode"
+#define CLOUD_REQUEST_TIMEOUT_MS 4000       ///< HTTP timeout in ms
+
+// ============================================================================
+// NTP TIME SYNCHRONIZATION CONFIGURATION
+// ============================================================================
+#define NTP_SERVER1 "pool.ntp.org"
+#define NTP_SERVER2 "time.google.com"
+#define NTP_SERVER3 "time.nist.gov"
 
 #endif // CONFIG_H

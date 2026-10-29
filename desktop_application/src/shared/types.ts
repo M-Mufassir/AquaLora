@@ -99,6 +99,8 @@ export interface WifiConnectionState {
 
 export interface DiscoveredMasterNode {
   id: string
+  code?: string
+  name?: string
   ip: string
   port: number
   service?: string
