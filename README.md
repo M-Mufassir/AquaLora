@@ -398,22 +398,95 @@ https://aqualora.up.railway.app
 
 For deployment setup, see the backend README in `Backend/README.md` and the app configuration section in `desktop_application/README.md`.
 
-### Build the desktop installer (.exe)
+### Desktop Application Packaging (Windows & Linux)
 
-From the `desktop_application` folder, run:
+AquaLoRa's desktop workstation can be packaged into native installable bundles using `electron-builder`.
+
+#### 1. Windows Installable Application (.exe)
+
+From the `desktop_application` directory (with Visual Studio C++ Build Tools installed for `better-sqlite3`):
 
 ```bash
+cd desktop_application
 npm install
 npm run build:win
 ```
 
-This builds the app and creates the Windows installer at:
+This compiles TypeScript, bundles Vite assets, and outputs the following in `desktop_application/dist/`:
 
-```text
-desktop_application/dist/aqualora-dashboard-0.1.0-setup.exe
+| Artifact | Format | Description |
+| :--- | :--- | :--- |
+| `AquaLoRa-Desktop-0.1.0-setup.exe` | **NSIS Installer** | Full installer creating Start Menu and Desktop shortcuts, plus uninstaller in Windows Settings. |
+| `AquaLoRa-Desktop-0.1.0-portable.exe` | **Portable Executable** | Standalone single `.exe` file that runs immediately without installation. |
+| `win-unpacked/` | **Directory** | Unpacked folder with `aqualora-desktop.exe` for instant local testing. |
+
+---
+
+#### 2. Linux Installable Application (.AppImage & .deb)
+
+Because `better-sqlite3` is a native C++ Node.js module compiled for the host OS kernel and C libraries, Linux packages should be built on a Linux environment (Ubuntu machine, WSL 2, Docker, or GitHub Actions):
+
+```bash
+# 1. Install prerequisites (Node.js 22 + build tools for C++ addons)
+sudo apt update
+sudo apt install -y build-essential python3 curl git
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt install -y nodejs
+
+# 2. Build Linux packages
+cd desktop_application
+npm ci
+npm run build:linux
 ```
 
-The generated `.exe` file is the installable desktop application for Windows users. If you want a portable debug build or want to inspect unpacked files, the `dist/win-unpacked/` folder is also created automatically.
+This generates two production artifacts in `desktop_application/dist/`:
+- **`AquaLoRa-Desktop-0.1.0.AppImage`**: Universal portable binary compatible with all major Linux distributions.
+- **`aqualora-desktop_0.1.0_amd64.deb`**: Standard native Debian / Ubuntu installation package.
+
+---
+
+#### 3. How to Install and Run on Linux
+
+##### Option A: Running the AppImage (Recommended — Universal & Instant)
+
+1. Make the AppImage executable:
+   ```bash
+   chmod +x AquaLoRa-Desktop-0.1.0.AppImage
+   ```
+
+2. Run the application:
+   ```bash
+   ./AquaLoRa-Desktop-0.1.0.AppImage
+   ```
+
+> [!NOTE]
+> On **Ubuntu 22.04 or 24.04**, if the AppImage does not launch due to missing FUSE libraries, install `libfuse2`:
+> ```bash
+> sudo apt install -y libfuse2
+> ```
+
+##### Option B: Installing the `.deb` Package (Debian / Ubuntu / Linux Mint)
+
+1. Install via `dpkg`:
+   ```bash
+   sudo dpkg -i aqualora-desktop_0.1.0_amd64.deb
+   ```
+
+2. Resolve any missing shared libraries automatically:
+   ```bash
+   sudo apt-get install -f -y
+   ```
+
+3. Launch AquaLoRa from your desktop application launcher or via terminal:
+   ```bash
+   aqualora-desktop
+   ```
+
+4. To uninstall:
+   ```bash
+   sudo apt remove aqualora-desktop
+   ```
+
 
 ## 12. Getting Started
 

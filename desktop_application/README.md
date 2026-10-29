@@ -17,6 +17,61 @@ npm run dev
 
 If an earlier install stopped at `better-sqlite3`, close running Electron/Node processes, remove `node_modules`, and run the two commands again after installing the C++ workload. `electron-vite` is installed locally by `npm install`; it is not expected to be available as a global command.
 
+
+## Packaging & Building Installers (Windows & Linux)
+
+Production installers and standalone packages are created with `electron-builder`.
+
+### Windows (.exe)
+
+Run the packaging script from the `desktop_application` directory:
+
+```bash
+npm run build:win
+```
+
+This compiles TypeScript (`npm run typecheck`), bundles Vite assets (`electron-vite build`), and builds Windows executables into `dist/`:
+
+- **`AquaLoRa-Desktop-0.1.0-setup.exe`**: Full NSIS installer. Configures desktop icon, Start Menu shortcut, and Windows uninstaller.
+- **`AquaLoRa-Desktop-0.1.0-portable.exe`**: Standalone single executable that launches immediately without installation.
+- **`dist/win-unpacked/`**: Direct unpacked binary folder (`aqualora-desktop.exe`).
+
+### Linux (.AppImage & .deb)
+
+Because `better-sqlite3` is a native C++ module compiled for the host OS kernel and C runtime, Linux binaries should be built on a Linux environment (Ubuntu 22.04/24.04, WSL 2, or Docker):
+
+```bash
+# 1. Install prerequisites (Node.js 22 + C++ build tools)
+sudo apt update
+sudo apt install -y build-essential python3 curl git
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt install -y nodejs
+
+# 2. Install dependencies & build for Linux
+npm ci
+npm run build:linux
+```
+
+This generates:
+- **`AquaLoRa-Desktop-0.1.0.AppImage`**: Universal portable binary compatible with all major Linux distributions.
+- **`aqualora-desktop_0.1.0_amd64.deb`**: Native Debian / Ubuntu / Linux Mint installer package.
+
+### How to Install and Run on Linux
+
+#### 1. Running the AppImage (Recommended)
+```bash
+chmod +x AquaLoRa-Desktop-0.1.0.AppImage
+./AquaLoRa-Desktop-0.1.0.AppImage
+```
+*(On Ubuntu 22.04+ or 24.04, if FUSE is missing, run: `sudo apt install -y libfuse2`)*
+
+#### 2. Installing the .deb Package
+```bash
+sudo dpkg -i aqualora-desktop_0.1.0_amd64.deb
+sudo apt-get install -f -y
+```
+Then launch by typing `aqualora-desktop` in terminal or finding **AquaLoRa Desktop** in the Applications menu.
+
 This README covers (1) how this dashboard fits into the full AquaLoRa system, (2) this repo's own architecture, (3) what's been built so far and how to run it, (4) the exact wire protocol/encryption and node-detection techniques underneath the pairing flow, and (5) what's left before this can go live on real hardware.
 
 ---
@@ -379,7 +434,7 @@ The dashboard side, including the real-MCU WiFi pairing flow, is functionally co
 
 **Polish, not blocking:**
 
-- [ ] Production packaging (`npm run build:win`) hasn't been run end-to-end to produce a real installer — worth doing at least once before a demo/handoff.
+- [x] **Production packaging for Windows (.exe) and Linux (.AppImage, .deb)**: Configured in `electron-builder.yml` and verified.
 - [ ] App window size/position and last-viewed node aren't remembered between launches (always opens maximized, always starts on Home).
 - [ ] The Critical-alert sound is a generated two-tone beep (Web Audio, no bundled file) — fine as-is, but swap-able for a custom sound if the team wants one.
 - [ ] There's a leftover `operator` test account in the dev database from earlier UI testing with an unknown password — delete it (or reset its password) via Settings before demoing, or just start from a fresh DB (see § 4).

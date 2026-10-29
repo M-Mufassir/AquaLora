@@ -38,12 +38,13 @@ dmg:
 linux:
   target:
     - AppImage
-    - snap
     - deb
-  maintainer: electronjs.org
+  maintainer: AquaLoRa Team 
   category: Utility
 appImage:
-  artifactName: ${name}-${version}.${ext}
+  artifactName: AquaLoRa-Desktop-${version}.${ext}
+deb:
+  artifactName: aqualora-desktop_${version}_${arch}.${ext}
 npmRebuild: false
 publish:
   provider: generic
