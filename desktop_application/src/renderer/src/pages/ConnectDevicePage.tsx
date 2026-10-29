@@ -243,12 +243,6 @@ function ConnectDevicePage({ onComplete, isOnboarding = false }: ConnectDevicePa
         cloudUrl: cloudUrl.trim() || undefined
       })
 
-      if (result.session?.role === 'super_admin') {
-        const portalUrl = (cloudUrl.trim() || 'https://aqualora.up.railway.app/api').replace(/\/api\/?$/, '')
-        setAdminPortalUrl(portalUrl)
-        setIsConnectingDevice(false)
-        return
-      }
 
       setStatusMessage(result.message || 'Master Node paired and added to local gateway.')
 

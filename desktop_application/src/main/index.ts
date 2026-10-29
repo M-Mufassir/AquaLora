@@ -171,7 +171,7 @@ async function performCloudSync(isManual = false): Promise<CloudSyncStatus> {
 
   isSyncInProgress = true
   const baseUrl = getSettingOptional('cloud_sync_url')?.trim() || DEFAULT_CLOUD_API_URL
-  const activeCode = getActiveMasterNodeCode() || getSettingOptional('master_node_code')
+  const activeCode = getActiveMasterNodeCode() || getSettingOptional('master_node_code') || 'AQL-0001'
 
   try {
     // 1. Check internet connectivity
@@ -200,13 +200,14 @@ async function performCloudSync(isManual = false): Promise<CloudSyncStatus> {
           authNodeCode === 'AQL-TEST' || activeCode === 'test-master-node' || activeCode === 'test-master'
             ? 'testmaster123'
             : 'aqualora123'
+        const authClient = (authNodeCode === 'AQL-0001' || authNodeCode === 'AQL-001') ? 'masternode' : 'desktop'
         const res = await fetch(loginUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             node_code: authNodeCode,
             password: authPassword,
-            client: 'desktop'
+            client: authClient
           })
         })
         if (res.ok) {
@@ -669,14 +670,19 @@ app.whenReady().then(() => {
         const timeoutId = setTimeout(() => controller.abort(), 8000)
 
         try {
+          const authNodeCode =
+            nodeCode === 'master-node' || nodeCode === 'AquaLoRa-Master' ? 'AQL-0001' : nodeCode
+          const authClient =
+            authNodeCode === 'AQL-0001' || authNodeCode === 'AQL-001' ? 'masternode' : 'desktop'
+
           // 5a. Try to login as existing node first
           const loginRes = await fetch(loginUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              node_code: nodeCode,
+              node_code: authNodeCode,
               password: effectivePassword,
-              client: 'desktop'
+              client: authClient
             }),
             signal: controller.signal
           })
@@ -686,7 +692,7 @@ app.whenReady().then(() => {
             session = {
               token: data.access_token || data.token || '',
               masterNodeId: data.master_node_id || 1,
-              nodeCode: data.node_code || nodeCode,
+              nodeCode: data.node_code || authNodeCode,
               displayName: data.display_name || displayName,
               role: data.role || 'customer',
               savedAt: new Date().toISOString()
