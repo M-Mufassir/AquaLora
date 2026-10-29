@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
   --font-sans: "DM Sans", "Segoe UI", sans-serif;
   --font-display: "Space Grotesk", "DM Sans", sans-serif;
@@ -7,51 +9,93 @@
 
 :root {
   font-family: "DM Sans", "Segoe UI", sans-serif;
-  color: #10283d;
+  color: #0f172a;
   background: #f4f8fb;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
+  color-scheme: light;
+}
+
+html.dark {
+  color: #f1f8fc;
+  background: #061722;
+  color-scheme: dark;
 }
 
 * {
   box-sizing: border-box;
 }
+
 body {
   margin: 0;
   min-width: 320px;
+  transition: background-color 0.25s ease, color 0.25s ease;
 }
+
 button,
 input,
 select {
   font: inherit;
 }
+
 button {
   cursor: pointer;
 }
+
 ::selection {
-  background: #9ddcf3;
-  color: #071b2d;
+  background: #06b6d4;
+  color: #ffffff;
 }
 
 @keyframes rise-in {
   from {
     opacity: 0;
-    transform: translateY(10px);
+    transform: translateY(12px);
   }
   to {
     opacity: 1;
     transform: translateY(0);
   }
 }
+
 .animate-rise {
-  animation: rise-in 0.45s ease-out both;
+  animation: rise-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 rgba(6, 182, 212, 0.6);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgba(6, 182, 212, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(6, 182, 212, 0);
+  }
+}
+
+.animate-pulse-ring {
+  animation: pulse-ring 2s infinite;
 }
 
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
 }
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
 ::-webkit-scrollbar-thumb {
-  background: #b9cedb;
+  background: #cbd5e1;
   border-radius: 999px;
+}
+
+html.dark ::-webkit-scrollbar-thumb {
+  background: #1e3a52;
+}
+
+html.dark ::-webkit-scrollbar-thumb:hover {
+  background: #0284c7;
 }

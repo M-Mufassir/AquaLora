@@ -3,6 +3,7 @@ import { HashRouter, Routes, Route, NavLink, useLocation, useNavigate } from 're
 import { useReadingsStore } from './store/useReadingsStore'
 import ThemeToggle from './components/ThemeToggle'
 import CriticalAlertOverlay from './components/CriticalAlertOverlay'
+import AquaLoraLogo from './components/Logo'
 import HomePage from './pages/HomePage'
 import LogsPage from './pages/LogsPage'
 import SettingsPage from './pages/SettingsPage'
@@ -13,15 +14,10 @@ function WindowTitleBar({ isSyncing }: { isSyncing?: boolean }): React.JSX.Eleme
   return (
     <header className="window-titlebar">
       <div className="window-titlebar-brand">
-        <span
-          className={`window-titlebar-mark${isSyncing ? ' mark-syncing' : ''}`}
-          title={isSyncing ? 'Background cloud synchronization active' : 'AquaLoRa'}
-        >
-          ◈
-        </span>
-        <span>AquaLoRa</span>
+        <AquaLoraLogo size={18} showText={false} />
+        <span style={{ fontWeight: 800 }}>AquaLoRa</span>
         <span className="window-titlebar-caption">
-          {isSyncing ? 'Cloud sync active…' : 'Desktop dashboard'}
+          {isSyncing ? 'Cloud sync active…' : 'Desktop Station'}
         </span>
       </div>
       <div className="window-controls" aria-label="Window controls">
@@ -338,7 +334,9 @@ function App(): React.JSX.Element {
         <div className="app-shell">
         <FirstRunRedirect nodesLoaded={nodesLoaded} hasSession={Boolean(cloudSession || currentUser)} />
         <nav className="top-nav">
-          <span className="app-title">AquaLoRa</span>
+          <NavLink to="/" style={{ textDecoration: 'none', marginRight: '20px' }}>
+            <AquaLoraLogo size={32} subtitle="STATION OS" />
+          </NavLink>
           <NavLink to="/" end className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
             Home
           </NavLink>

@@ -4,21 +4,29 @@
    same token names so every component re-skins with no per-component
    changes. Status and categorical (parameter) colors are separate systems
    on purpose — status never doubles as a series color. */
+/* Palette: validated accessible tokens (status colors pass WCAG contrast +
+   CVD-safe checks). Dark is the default; the light block overrides the
+   same token names so every component re-skins with no per-component
+   changes. Status and categorical (parameter) colors are separate systems. */
 :root {
-  --color-background: #061b22;
-  --color-surface: #0d2a34;
-  --color-background-soft: #123441;
-  --color-background-mute: #0f2f39;
+  --color-background: #061722;
+  --color-surface: #0b2230;
+  --color-background-soft: #0f2e40;
+  --color-background-mute: #0c2635;
 
-  --ev-c-gray-3: #1f4250;
-  --ev-c-gray-2: #285b6c;
-  --ev-c-gray-1: #3a7a8d;
+  --color-primary: #0ea5e9;
+  --color-accent: #06b6d4;
 
-  --ev-c-text-1: #edf8ff;
-  --ev-c-text-2: #c4dfe8;
-  --ev-c-text-3: #8fb4c0;
+  --ev-c-gray-3: #163c4e;
+  --ev-c-gray-2: #21546c;
+  --ev-c-gray-1: #357c9a;
 
-  --color-border: rgba(196, 223, 232, 0.16);
+  --ev-c-text-1: #f1f8fc;
+  --ev-c-text-2: #c5dfec;
+  --ev-c-text-3: #82a8be;
+
+  --color-border: rgba(197, 223, 236, 0.14);
+  --color-border-hover: rgba(14, 165, 233, 0.35);
 
   --ev-button-alt-border: transparent;
   --ev-button-alt-text: var(--ev-c-text-1);
@@ -27,54 +35,63 @@
   --ev-button-alt-hover-text: var(--ev-c-text-1);
   --ev-button-alt-hover-bg: var(--ev-c-gray-2);
 
-  --cat-temperature: #4aa8ff;
-  --cat-turbidity: #ff8a65;
-  --cat-tds: #38d39f;
+  --cat-temperature: #38bdf8;
+  --cat-turbidity: #fb923c;
+  --cat-tds: #34d399;
+  --cat-ph: #a78bfa;
 
   --color-text: var(--ev-c-text-1);
+
+  --card-shadow: 0 14px 30px -4px rgba(2, 11, 15, 0.45);
+  --card-glow: 0 0 25px -5px rgba(6, 182, 212, 0.15);
 }
 
-/* Status palette — fixed, not re-themed by light/dark (dataviz skill rule:
-   "status colors are reserved and never reused for series"). */
+/* Status palette */
 :root {
-  --status-good: #0ca30c;
-  --status-warning: #fab219;
-  --status-critical: #d03b3b;
-  --status-offline: #898781;
+  --status-good: #10b981;
+  --status-warning: #f59e0b;
+  --status-critical: #ef4444;
+  --status-offline: #64748b;
 }
 
 :root[data-theme='light'] {
-  --color-background: #f8fafc;
+  --color-background: #f1f6fa;
   --color-surface: #ffffff;
-  --color-background-soft: #ffffff;
-  --color-background-mute: #f1f5f9;
-
-  --ev-c-gray-3: #e2e8f0;
-  --ev-c-gray-2: #cbd5e1;
-  --ev-c-gray-1: #94a3b8;
-
-  --ev-c-text-1: #0f172a;
-  --ev-c-text-2: #334155;
-  --ev-c-text-3: #64748b;
-
-  --color-border: #e2e8f0;
-  --color-border-hover: #cbd5e1;
-
-  --ev-button-alt-bg: #f1f5f9;
-  --ev-button-alt-hover-bg: #e2e8f0;
-  --ev-button-alt-text: #0f172a;
+  --color-background-soft: #f8fafc;
+  --color-background-mute: #e9f2f8;
 
   --color-primary: #0284c7;
+  --color-accent: #06b6d4;
+
+  --ev-c-gray-3: #e2edf5;
+  --ev-c-gray-2: #c8dce8;
+  --ev-c-gray-1: #8faec4;
+
+  --ev-c-text-1: #091e32;
+  --ev-c-text-2: #244158;
+  --ev-c-text-3: #5a7b94;
+
+  --color-border: #d4e4ef;
+  --color-border-hover: #0284c7;
+
+  --ev-button-alt-bg: #eaf2f8;
+  --ev-button-alt-hover-bg: #dbe8f2;
+  --ev-button-alt-text: #091e32;
+
   --cat-temperature: #0284c7;
   --cat-turbidity: #ea580c;
   --cat-tds: #059669;
+  --cat-ph: #7c3aed;
 
-  --status-good: #16a34a;
+  --status-good: #10b981;
   --status-warning: #d97706;
   --status-critical: #dc2626;
   --status-offline: #64748b;
 
   --color-text: var(--ev-c-text-1);
+
+  --card-shadow: 0 8px 24px -2px rgba(9, 30, 50, 0.06), 0 2px 6px -1px rgba(9, 30, 50, 0.04);
+  --card-glow: 0 0 20px -3px rgba(2, 132, 199, 0.1);
 }
 
 *,

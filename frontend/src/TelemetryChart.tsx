@@ -455,15 +455,15 @@ export function WaterQualityChart({
           {/* Time Range Selector & Param Switcher */}
           <div className="flex flex-wrap items-center gap-2">
             {/* Time Ranges */}
-            <div className="flex items-center rounded-xl bg-slate-100 p-1 border border-slate-200 text-xs font-bold text-slate-600">
+            <div className="flex items-center rounded-xl bg-slate-100 dark:bg-black/20 p-1 border border-slate-200 dark:border-white/10 text-xs font-bold text-slate-600 dark:text-slate-300">
               {(['1h', '6h', '24h', '7d', '30d', 'all'] as TimeRange[]).map((tr) => (
                 <button
                   key={tr}
                   onClick={() => setTimeRange(tr)}
                   className={`rounded-lg px-2.5 py-1 transition ${
                     timeRange === tr
-                      ? 'bg-white text-cyan-700 shadow-sm font-extrabold'
-                      : 'hover:text-slate-900'
+                      ? 'bg-white dark:bg-[#0b2230] text-cyan-700 dark:text-cyan-400 shadow-sm font-extrabold'
+                      : 'hover:text-slate-900 dark:hover:text-white'
                   }`}
                 >
                   {tr.toUpperCase()}
@@ -476,7 +476,7 @@ export function WaterQualityChart({
               <select
                 value={selectedFacility}
                 onChange={(e) => setSelectedFacility(e.target.value)}
-                className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 outline-none hover:bg-slate-50"
+                className="rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-[#071926] px-3 py-1.5 text-xs font-bold text-slate-700 dark:text-slate-300 outline-none hover:bg-slate-50 dark:hover:bg-white/5"
               >
                 <option value="all">All Facilities ({distinctFacilities.length})</option>
                 {distinctFacilities.map((f) => (
@@ -492,7 +492,7 @@ export function WaterQualityChart({
               <select
                 value={selectedNode}
                 onChange={(e) => setSelectedNode(e.target.value)}
-                className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 outline-none hover:bg-slate-50"
+                className="rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-[#071926] px-3 py-1.5 text-xs font-bold text-slate-700 dark:text-slate-300 outline-none hover:bg-slate-50 dark:hover:bg-white/5"
               >
                 <option value="all">All Probes ({distinctNodes.length})</option>
                 {distinctNodes.map((id) => (
@@ -512,8 +512,8 @@ export function WaterQualityChart({
           onClick={() => setActiveParam('all')}
           className={`flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold transition ${
             activeParam === 'all'
-              ? 'bg-slate-900 text-white shadow-md'
-              : 'border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100'
+              ? 'bg-slate-900 dark:bg-cyan-600 text-white shadow-md'
+              : 'border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/10'
           }`}
         >
           <Layers size={13} />
@@ -531,7 +531,7 @@ export function WaterQualityChart({
               className={`flex items-center gap-1.5 rounded-xl px-3.5 py-1.5 text-xs font-bold transition ${
                 isActive
                   ? 'text-white shadow-md'
-                  : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                  : 'border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/10'
               }`}
               style={{
                 backgroundColor: isActive ? meta.color : undefined
@@ -549,17 +549,17 @@ export function WaterQualityChart({
       <div className="relative mt-4 w-full">
         {filteredReadings.length === 0 ? (
           <div
-            className="flex flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50/50 p-12 text-center"
+            className="flex flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 dark:border-white/10 bg-slate-50/50 dark:bg-white/5 p-12 text-center"
             style={{ height }}
           >
-            <BarChart3 className="text-slate-300" size={36} />
-            <p className="mt-3 text-sm font-bold text-slate-700">No telemetry recorded for this filter</p>
-            <p className="mt-1 text-xs text-slate-400 max-w-sm">
+            <BarChart3 className="text-slate-300 dark:text-slate-600" size={36} />
+            <p className="mt-3 text-sm font-bold text-slate-700 dark:text-slate-300">No telemetry recorded for this filter</p>
+            <p className="mt-1 text-xs text-slate-400 dark:text-slate-500 max-w-sm">
               Adjust your time range or node filters to inspect sensor data streams.
             </p>
           </div>
         ) : (
-          <div className="relative overflow-hidden rounded-xl bg-gradient-to-b from-slate-50/60 to-white border border-slate-100 p-2">
+          <div className="relative overflow-hidden rounded-xl bg-gradient-to-b from-slate-50/60 to-white dark:from-[#061722]/80 dark:to-[#071926] border border-slate-100 dark:border-white/10 p-2">
             <svg
               viewBox={`0 0 ${svgWidth} ${svgHeight}`}
               className="w-full h-auto overflow-visible select-none"
@@ -643,7 +643,7 @@ export function WaterQualityChart({
                     y1={tick.y}
                     x2={padLeft + innerWidth}
                     y2={tick.y}
-                    stroke="#e2e8f0"
+                    className="stroke-slate-200 dark:stroke-white/10"
                     strokeDasharray="3 3"
                     strokeWidth="1"
                   />
@@ -786,15 +786,15 @@ export function WaterQualityChart({
             {/* Floating Rich Tooltip */}
             {hoverIndex !== null && activeHoverReading && (
               <div
-                className="absolute z-20 pointer-events-none rounded-xl border border-slate-200 bg-white/95 p-3 shadow-xl backdrop-blur-md transition-all text-xs"
+                className="absolute z-20 pointer-events-none rounded-xl border border-slate-200 dark:border-white/10 bg-white/95 dark:bg-[#0b2230]/95 p-3 shadow-xl backdrop-blur-md transition-all text-xs text-slate-800 dark:text-slate-100"
                 style={{
                   top: '16px',
                   right: '16px',
                   minWidth: '220px'
                 }}
               >
-                <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                  <div className="flex items-center gap-1.5 font-bold text-slate-800">
+                <div className="flex items-center justify-between border-b border-slate-100 dark:border-white/10 pb-2">
+                  <div className="flex items-center gap-1.5 font-bold text-slate-800 dark:text-white">
                     <span className="flex h-2 w-2 rounded-full bg-cyan-500" />
                     <span>Probe {activeHoverReading.node_id}</span>
                   </div>
@@ -968,7 +968,7 @@ export function FleetHealthGauge({
           cx={size / 2}
           cy={size / 2}
           r={radius}
-          stroke="#e2e8f0"
+          className="stroke-slate-200 dark:stroke-white/10"
           strokeWidth="8"
           fill="none"
         />
@@ -986,8 +986,8 @@ export function FleetHealthGauge({
         />
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
-        <span className="font-display text-2xl font-black text-slate-900 leading-none">{score}</span>
-        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mt-1">{label}</span>
+        <span className="font-display text-2xl font-black text-slate-900 dark:text-white leading-none">{score}</span>
+        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-400 mt-1">{label}</span>
       </div>
     </div>
   )
